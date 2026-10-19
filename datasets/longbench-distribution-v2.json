@@ -1,0 +1,45 @@
+{
+  "tokenizer": "moonshotai/Kimi-K3 tiktoken.model",
+  "unit": "tokens",
+  "basis": "v1=context+input; v2=context+question+choices; no chat template",
+  "bounds": [
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+    65536,
+    131072,
+    262144,
+    524288,
+    1048576
+  ],
+  "groups": {
+    "LongBench-v2": {
+      "n": 503,
+      "bins": [
+        0,
+        0,
+        0,
+        0,
+        30,
+        88,
+        72,
+        128,
+        89,
+        48,
+        17,
+        31
+      ],
+      "min": 10019,
+      "max": 4009489,
+      "total": 121597889,
+      "categories": {
+        "long": 108,
+        "short": 180,
+        "medium": 215
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+data/
+.venv/
+datasets/raw/
+datasets/tokenizers/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example

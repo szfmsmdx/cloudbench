@@ -1,0 +1,63 @@
+{
+  "tokenizer": "moonshotai/Kimi-K3 tiktoken.model",
+  "unit": "tokens",
+  "basis": "v1=context+input; v2=context+question+choices; no chat template",
+  "bounds": [
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+    65536,
+    131072,
+    262144,
+    524288,
+    1048576
+  ],
+  "groups": {
+    "LongBench": {
+      "n": 4750,
+      "bins": [
+        38,
+        360,
+        787,
+        1233,
+        1764,
+        472,
+        96,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "min": 131,
+      "max": 65026,
+      "total": 46043837,
+      "categories": {
+        "2wikimqa": 200,
+        "dureader": 200,
+        "gov_report": 200,
+        "hotpotqa": 200,
+        "lcc": 500,
+        "lsht": 200,
+        "multifieldqa_en": 150,
+        "multifieldqa_zh": 200,
+        "multi_news": 200,
+        "musique": 200,
+        "narrativeqa": 200,
+        "passage_count": 200,
+        "passage_retrieval_en": 200,
+        "passage_retrieval_zh": 200,
+        "qasper": 200,
+        "qmsum": 200,
+        "repobench-p": 500,
+        "samsum": 200,
+        "trec": 200,
+        "triviaqa": 200,
+        "vcsum": 200
+      }
+    }
+  }
+}

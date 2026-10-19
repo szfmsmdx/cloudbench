@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111923">
+  <title>CloudBench · 模型性能与成本基准测试</title>
+  <meta name="description" content="在本地测试模型 API 的延迟、吞吐、缓存和 token 成本。">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/charts.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#overview" aria-label="CloudBench 首页"><span class="brand-mark"><span></span><span></span><span></span><span></span></span><span>cloud<span class="brand-light">bench</span><small>MODEL INTELLIGENCE</small></span></a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span> 概览 <span class="nav-count" id="nav-run-count">0</span></button>
+        <button class="nav-item" data-view="targets"><span class="nav-icon">⌘</span> 模型端点</button>
+        <button class="nav-item" data-view="prices"><span class="nav-icon">◈</span> 价格目录</button>
+        <button class="nav-item" data-view="history"><span class="nav-icon">▤</span> 测试记录</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="local-badge"><span class="pulse"></span><div><strong>本地运行</strong><small>数据存储在当前设备</small></div></div>
+        <a class="doc-link" href="/api/state" target="_blank" rel="noopener">API 状态 <span>↗</span></a>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="breadcrumb">工作台 <span>/</span> <strong id="view-name">概览</strong></div><div class="top-actions"><span class="version">BETA 0.2</span><span class="avatar">CB</span></div></header>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <section class="view active" id="view-overview">
+        <div class="hero"><div><div class="eyebrow"><span class="eyebrow-line"></span> MODEL BENCHMARK WORKSPACE</div><h1>看清模型表现，<br><em>算明每一分成本。</em></h1><p>从首字延迟到吞吐与缓存使用，以同一套测试口径衡量你的模型端点。</p><button class="primary hero-cta" id="hero-start">开始一次测试 <span>↗</span></button></div><div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="art-card"><div class="art-top"><span>LIVE SIGNAL</span><i></i></div><div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="art-bottom"><strong>42.8</strong><small>ms · TTFT</small></div></div></div></div>
+        <div class="section-heading"><div><span class="overline">YOUR WORKSPACE</span><h2>工作台概况</h2></div><span class="muted">实时读取本地数据</span></div>
+        <div class="stat-grid"><div class="stat-card"><div class="stat-icon mint">⌘</div><span>已连接端点</span><strong id="stat-targets">0</strong><small>本地与云端模型</small></div><div class="stat-card"><div class="stat-icon violet">▤</div><span>测试运行</span><strong id="stat-runs">0</strong><small>完整历史记录</small></div><div class="stat-card"><div class="stat-icon amber">◈</div><span>价格版本</span><strong id="stat-prices">0</strong><small>每百万 token 报价</small></div></div>
+        <div class="overview-grid"><div class="panel quickstart"><div class="panel-heading"><span class="overline">GET STARTED</span><h3>从这里开始</h3><p>三步完成一次可复现的基准测试。</p></div><div class="steps"><div class="step"><span>01</span><div><strong>添加模型端点</strong><small>填写服务地址、模型 ID 和可选 API Key</small></div><button data-view="targets" aria-label="前往模型端点">↗</button></div><div class="step"><span>02</span><div><strong>录入价格</strong><small>保存官方报价或你的自定义费率</small></div><button data-view="prices" aria-label="前往价格目录">↗</button></div><div class="step"><span>03</span><div><strong>运行并导出</strong><small>查看逐请求样本和汇总 CSV</small></div><button data-view="targets" aria-label="开始测试">↗</button></div></div></div><div class="panel recent-panel"><div class="panel-heading"><span class="overline">RECENT ACTIVITY</span><h3>最近测试</h3></div><div id="overview-recent" class="recent-list"></div></div></div>
+      </section>
+
+      <section class="view" id="view-targets">
+        <div class="page-heading"><div><span class="overline">ENDPOINTS & RUNS</span><h1>模型端点</h1><p>连接本地端口或云端 API，然后发送真实的流式请求。</p></div><span class="heading-symbol">⌘</span></div>
+        <div class="two-col"><div class="panel form-panel"><div class="panel-heading"><span class="overline">01 / CONNECTION</span><h3>添加端点</h3><p>支持 OpenAI 兼容的 Chat Completions 接口。</p></div><form id="target-form" class="form"><label>显示名称<input name="name" required maxlength="100" placeholder="例如：本地 Qwen 32B"></label><label>Base URL<input name="base_url" required type="url" placeholder="http://127.0.0.1:8000/v1"></label><div class="field-row"><label>模型 ID<input name="model" required placeholder="例如：Qwen3-32B"></label><label>API Key <span class="optional">可选</span><input name="api_key" type="password" autocomplete="off" placeholder="仅保存在本次服务内存"></label></div><p class="field-note">API Key 不写入数据库。重启 CloudBench 后可为端点重新填写。</p><button class="primary" type="submit">保存端点 <span>↗</span></button></form></div><div class="panel targets-panel"><div class="panel-heading"><span class="overline">SAVED CONNECTIONS</span><h3>已保存端点 <span class="title-count" id="target-count">0</span></h3></div><div id="target-list" class="target-list"></div></div></div>
+        <div class="panel run-panel" id="run-panel">
+          <div class="panel-heading run-heading"><div><span class="overline">02 / BENCHMARK</span><h3>创建测试</h3><p>选择工作负载，再设置请求到达方式与并发上限。</p></div><span class="pill"><span class="pill-dot"></span> 流式测量</span></div>
+          <form id="run-form" class="form run-form">
+            <div class="field-row three"><label>目标端点<select name="target_id" id="run-target" required><option value="">请选择端点</option></select></label><label>价格版本 <span class="optional">可选</span><select name="price_id" id="run-price"><option value="">不计算 token 费用</option></select></label><label>输出上限 / tokens<input name="max_tokens" type="number" min="1" max="8192" value="128" required></label></div>
+            <div class="form-divider"><span>01</span><strong>工作负载</strong><small>DATASET</small></div>
+            <label>选择数据集<select name="dataset_id" id="run-dataset" required><option value="">请选择数据集</option></select></label>
+            <div class="dataset-info" id="dataset-info">选择数据集后显示长度分布。</div>
+            <label id="local-options" hidden>模型上下文上限 / K <span class="hint">1K = 1024 tokens；1024K = 1M</span><input name="context_limit_k" type="number" min="2" max="4096" step="1" value="128"></label>
+            <label>测试条数 <span class="hint">留空＝全量，按上下文上限筛选</span><input name="request_count" type="number" min="1" max="5000" placeholder="可选，例如 100"></label>
+            <div class="form-divider"><span>02</span><strong>发压方式</strong><small>TRAFFIC</small></div>
+            <div class="mode-switch" role="radiogroup" aria-label="发压方式"><label class="mode-choice"><input type="radio" name="mode" value="sync" checked><span><strong>同步串行</strong><small>每个请求完成后再发送下一个</small></span></label><label class="mode-choice"><input type="radio" name="mode" value="async"><span><strong>异步按 QPS</strong><small>指定到达速率与最大在途请求数</small></span></label></div>
+            <div class="field-row async-fields" id="async-fields" hidden><label>目标 QPS <span class="hint">0 = 尽快全部发起</span><input name="request_rate" type="number" min="0" max="1000" step="any" value="5"></label><label>最大并发数 <span class="hint">留空 = 请求总数</span><input name="concurrency" type="number" min="1" max="5000" placeholder="可选，例如 16"></label></div>
+            <div class="traffic-note" id="traffic-note">同步模式会以并发 1 串行发送，不设置目标 QPS。</div>
+            <label class="check-label usage-check"><input type="checkbox" name="include_usage" checked><span>请求流式 usage<small>若接口不支持 stream_options，请关闭</small></span></label>
+            <div class="form-divider"><span>03</span><strong>硬件成本</strong><small>OPTIONAL</small></div>
+            <div class="field-row three hardware-row"><label>GPU 数量 <span class="optional">可选</span><input name="gpu_count" type="number" min="1" max="128" placeholder="例如：8"></label><label>每卡每小时成本<input name="gpu_hour_price" type="number" min="0" step="any" placeholder="例如：12.5"></label><label>币种<input name="gpu_currency" maxlength="8" value="CNY"></label></div>
+            <div class="form-footer"><span>真实请求可能产生费用；先用少量请求确认端点和数据集。</span><button class="primary" id="run-button" type="submit">运行测试 <span>→</span></button></div>
+          </form>
+        </div>
+        <div class="panel result-panel" id="result-panel" hidden><div class="panel-heading result-heading"><div><span class="overline">03 / RESULTS</span><h3 id="result-title">测试结果</h3><p id="result-subtitle"></p></div><div class="result-actions"><button class="ghost" id="cancel-run" hidden>停止测试</button><a class="secondary" id="export-summary" href="#">汇总 CSV ↓</a><a class="secondary" id="export-samples" href="#">逐请求 CSV ↓</a></div></div><div class="progress-wrap"><div class="progress-meta"><span id="run-status">运行中</span><span id="run-progress">0 / 0</span></div><div class="progress-bar"><span id="run-progress-bar"></span></div></div><div id="result-metrics" class="metric-grid"></div><div class="result-note" id="result-note"></div><div class="table-wrap"><table><thead><tr><th>#</th><th>状态</th><th>TTFT</th><th>TPOT</th><th>E2E</th><th>输入</th><th>输出</th><th>缓存</th><th>费用</th></tr></thead><tbody id="sample-rows"></tbody></table></div></div>
+      </section>
+
+      <section class="view" id="view-prices"><div class="page-heading"><div><span class="overline">PRICE CATALOG</span><h1>价格目录</h1><p>录入每百万 token 的报价。每次测试都会固定当时选用的价格版本。</p></div><span class="heading-symbol">◈</span></div><div class="panel form-panel"><div class="panel-heading"><span class="overline">NEW VERSION</span><h3>添加价格版本</h3><p>官方报价请附来源链接和核对日期；代理报价也可以单独录入。</p></div><form id="price-form" class="form"><div class="field-row three"><label>供应商<input name="provider" required placeholder="例如：DeepSeek 官方"></label><label>模型 ID<input name="model" required placeholder="例如：deepseek-chat"></label><label>币种<input name="currency" required value="USD" maxlength="8"></label></div><div class="field-row price-fields"><label>输入 / 1M tokens<input name="input_price" required type="number" step="any" min="0" placeholder="0.00"></label><label>缓存读取 / 1M<input name="cache_read_price" type="number" step="any" min="0" placeholder="可选"></label><label>缓存写入 / 1M<input name="cache_write_price" type="number" step="any" min="0" placeholder="可选"></label><label>输出 / 1M tokens<input name="output_price" required type="number" step="any" min="0" placeholder="0.00"></label></div><div class="field-row"><label>价格来源链接 <span class="optional">可选</span><input name="source_url" type="url" placeholder="https://..."></label><label>核对日期<input name="checked_at" id="price-date" type="date" required></label></div><div class="form-footer"><span>价格缺项时，CloudBench 不会虚构成本。</span><button class="primary" type="submit">保存价格 <span>↗</span></button></div></form></div><div class="panel catalog-panel"><div class="panel-heading"><span class="overline">SAVED VERSIONS</span><h3>已录入价格 <span class="title-count" id="price-count">0</span></h3></div><div class="table-wrap"><table><thead><tr><th>供应商 / 模型</th><th>输入</th><th>缓存读取</th><th>缓存写入</th><th>输出</th><th>币种</th><th>核对日期</th><th>来源</th></tr></thead><tbody id="price-rows"></tbody></table></div></div></section>
+
+      <section class="view" id="view-history"><div class="page-heading"><div><span class="overline">BENCHMARK ARCHIVE</span><h1>测试记录</h1><p>保留完整样本和每次测试所用的价格快照。</p></div><span class="heading-symbol">▤</span></div><div class="panel history-panel"><div class="panel-heading"><span class="overline">ALL RUNS</span><h3>历史运行</h3></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>端点</th><th>模型</th><th>请求数</th><th>状态</th><th></th></tr></thead><tbody id="history-rows"></tbody></table></div></div></section>
+      <footer class="footer"><span>cloudbench / local workspace</span><span>所有延迟均在当前设备测量 · 费用为估算</span></footer>
+    </main>
+  </div>
+</body>
+</html>
