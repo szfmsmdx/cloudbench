@@ -361,7 +361,9 @@ def prepare(root: Path, key: str, limit: int | None = None, max_turns: int | Non
             "prepared_at": datetime.now(timezone.utc).isoformat(), "sampling": "complete source partition" if limit is None else "explicit bounded slice",
             "offset": offset, "requested_rows": limit, "max_turns": max_turns,
             "tokenizer": tokenizer, "tokenizer_sha256": counter.fingerprint, "length_label": counter.label + "；多轮按消息累加参考",
-            "skipped_count": skipped, "skipped": errors, "raw_records_preserved": True, "reference_answers_sent": False})
+            "skipped_count": skipped, "skipped": errors, "raw_records_preserved": True,
+            "raw_storage": "完整原始文件保留于 datasets/raw；索引保存回放字段和源记录位置" if manifest else "完整输入记录保留于索引",
+            "reference_answers_sent": False})
         progress(status="complete", rows=info["raw_count"], accepted=info["item_count"])
         return info
     except BaseException as exc:

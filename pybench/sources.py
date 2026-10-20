@@ -107,9 +107,20 @@ def source_rows(root, key, manifest):
         path = directory / spec["filename"]
         if manifest["format"] == "parquet":
             import pyarrow.parquet as pq
-            # Keep only a few complete rows in memory; agent rows may be large.
-            for batch in pq.ParquetFile(path, pre_buffer=False).iter_batches(batch_size=1, use_threads=False):
-                yield from batch.to_pylist()
+            file = pq.ParquetFile(path, pre_buffer=False)
+            columns = file.schema_arrow.names
+            if key in {"open-swe", "swe-smith"}:
+                # Original Parquet files remain intact. Some auxiliary patches
+                # are hundreds of MB; reading them serves no benchmark purpose.
+                wanted = {"messages", "tools", "trajectory_id", "traj_id", "instance_id", "resolved", "model"}
+                columns = [name for name in columns if name in wanted]
+            row_index = 0
+            for batch in file.iter_batches(batch_size=1, columns=columns, use_threads=False):
+                for row in batch.to_pylist():
+                    row["_cloudbench_source"] = {"file": str(path.relative_to(root).as_posix()), "row": row_index,
+                        "fields_in_source": [name for name in file.schema_arrow.names if name not in columns]}
+                    yield row
+                    row_index += 1
         elif manifest["format"] == "jsonl.bz2":
             with bz2.open(path, "rt", encoding="utf-8") as stream:
                 for line in stream:

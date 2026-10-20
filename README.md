@@ -65,7 +65,7 @@ python -m pybench.prepare hotpotqa --limit 100
 
 默认使用 Kimi K3 分词器，仅下载必要的分词文件，不加载模型或运行下载的 Python。可用 `--tokenizer cl100k_base` 改用另一参考编码。长度包含正文、历史和工具定义的JSON表示；多轮历史按消息累加参考长度，未应用目标模型聊天模板。筛选口径与目标模型可能不同，实际用量取接口 usage。
 
-`datasets/raw/` 保留完整来源文件和清单；`datasets/prepared/` 保存 SQLite 索引、压缩后的完整原始记录和元数据。转换失败的原始记录同样保留，并记录错误。网页区分来源总量、可回放量、来源分区及导入状态；只有完整导入通过计数校验后才替换旧池。大文件不上传 GitHub。
+`datasets/raw/` 保留完整来源文件和清单；`datasets/prepared/` 保存 SQLite 回放索引、压缩记录和元数据。Parquet 的非回放字段（如数百MB的补丁）保留在原文件，索引记录文件、行号及字段位置，避免发压时加载无关内容。转换失败的记录也保留来源和错误。网页区分来源总量、可回放量、来源分区及导入状态；完整导入通过计数校验后才替换旧池。大文件不上传 GitHub。
 
 完整导入针对下列明确分区，不把其他版本或分区混入同一个池：Open-SWE `v1.2/minisweagent`，SWE-smith `default/tool`，HotpotQA `distractor/validation`，CRAG Task 1/2 dev v4，CRUD 官方 `crud_split/split_merged.json` 六类任务。HF 来源使用完整 Parquet 文件清单，记录文件 SHA-256 并校验总行数。各池实际数量与上游版本见网页及元数据，不固定为100。
 
