@@ -12,6 +12,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from pybench.prepare import agent_item, prepare, rag_item
+from pybench.sources import source_rows
 from pybench.workloads import IndexedWriter, catalog, hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, write_snapshot
 from server import create_app
 
@@ -28,6 +29,26 @@ def trajectory():
 
 
 class AdapterTests(unittest.TestCase):
+    def test_parquet_auxiliary_fields_remain_in_intact_source_and_all_rows_are_indexable(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "datasets/raw/swe-smith"
+            source_dir.mkdir(parents=True)
+            raw = trajectory()
+            source = source_dir / "0000.parquet"
+            pq.write_table(pa.Table.from_pylist([
+                {"messages": json.dumps(raw["messages"]), "traj_id": str(i), "patch": "keep-original-patch" * 1000}
+                for i in range(137)]), source)
+            rows = list(source_rows(root, "swe-smith", {"format": "parquet", "files": [{"filename": source.name}]}))
+            self.assertEqual(len(rows), 137)
+            self.assertNotIn("patch", rows[136])
+            self.assertEqual(rows[136]["_cloudbench_source"]["row"], 136)
+            self.assertEqual(rows[136]["_cloudbench_source"]["fields_in_source"], ["patch"])
+            original = pq.read_table(source, columns=["patch"]).to_pylist()
+            self.assertEqual(original[136]["patch"], "keep-original-patch" * 1000)
+
     def test_default_preparation_imports_more_than_100_and_preserves_raw_records(self):
         class Counter:
             fingerprint, label = "fixture", "fixture tokens"

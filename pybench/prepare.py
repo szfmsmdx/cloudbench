@@ -15,6 +15,7 @@ import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterator
@@ -63,6 +64,7 @@ class Counter:
             self.encoding = tiktoken.get_encoding(tokenizer)
             self.label = f"{tokenizer} 参考 token（不含聊天模板）"
             self.fingerprint = None
+        self.message_pool = ThreadPoolExecutor(max_workers=2)
 
     def __call__(self, turn: dict[str, Any]) -> int:
         text = json.dumps({k: turn[k] for k in ("messages", "tools") if k in turn}, ensure_ascii=False)
@@ -77,8 +79,10 @@ class Counter:
             return
         history = item["messages"][:turns[-1]["end"]] if "messages" in item else turns[-1]["messages"]
         prefix = [0]
-        for message in history:
-            prefix.append(prefix[-1] + len(self.encoding.encode_ordinary(json.dumps(message, ensure_ascii=False))) + 1)
+        def message_size(message):
+            return len(self.encoding.encode_ordinary(json.dumps(message, ensure_ascii=False))) + 1
+        for size in self.message_pool.map(message_size, history):
+            prefix.append(prefix[-1] + size)
         tools = item.get("tools") or turns[0].get("tools")
         frame = self({"messages": [], **({"tools": tools} if tools else {})})
         for turn in turns:
