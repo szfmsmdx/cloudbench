@@ -12,7 +12,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from pybench.prepare import agent_item, prepare, rag_item
-from pybench.workloads import IndexedWriter, catalog, hydrate_workload, load_workloads, paths, select_workloads, write_snapshot
+from pybench.workloads import IndexedWriter, catalog, hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, write_snapshot
 from server import create_app
 
 
@@ -66,6 +66,20 @@ class AdapterTests(unittest.TestCase):
             messages.extend([{"role": "user", "content": str(i)}, {"role": "assistant", "content": "answer"}])
         item = agent_item({"messages": messages}, 0)
         self.assertEqual(len(item["turns"]), 23)
+
+    def test_long_agent_import_and_replay_share_history_without_prefix_copies(self):
+        messages = []
+        for i in range(2000):
+            messages.extend([{"role": "user", "content": str(i)}, {"role": "assistant", "content": "answer"}])
+        item = agent_item({"messages": messages}, 0, compact=True)
+        self.assertEqual(len(item["turns"]), 2000)
+        self.assertEqual(len(item["messages"]), 4000)
+        self.assertTrue(all("messages" not in turn for turn in item["turns"]))
+        for turn in item["turns"]:
+            turn["input_tokens"] = 100
+        replay = iter_workload_turns(item)
+        self.assertEqual(next(replay)["messages"], [{"role": "user", "content": "0"}])
+        self.assertEqual(len(next(replay)["messages"]), 3)
 
     def test_excess_request_count_is_rejected_instead_of_repeating_samples(self):
         with self.assertRaisesRegex(ValueError, "不能通过重复"):

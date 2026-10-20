@@ -130,11 +130,20 @@ def hydrate_workload(root: Path, kind: str, unit: dict[str, Any]) -> dict[str, A
     with closing(sqlite3.connect(f"file:{data.as_posix()}?mode=ro", uri=True)) as db:
         payload, raw_sizes = db.execute("SELECT raw_record,turn_tokens FROM workloads WHERE idx=?", (unit["index"],)).fetchone()
     raw = json.loads(zlib.decompress(payload))
-    item = agent_item(raw, unit["index"], None) if CATALOG[key]["category"] == "agent" else rag_item(key, raw, unit["index"])
+    item = agent_item(raw, unit["index"], None, compact=True) if CATALOG[key]["category"] == "agent" else rag_item(key, raw, unit["index"])
     turns = item["turns"][:unit["turn_count"]]
     for turn, size in zip(turns, json.loads(raw_sizes)):
         turn["input_tokens"] = size
     return {**item, **unit, "turns": turns}
+
+
+def iter_workload_turns(unit):
+    for turn in unit["turns"]:
+        if "end" in turn:
+            yield {"messages": unit["messages"][:turn["end"]], "input_tokens": turn["input_tokens"],
+                   **({"tools": unit["tools"]} if unit.get("tools") else {})}
+        else:
+            yield turn
 
 
 class IndexedWriter:

@@ -22,7 +22,7 @@ import aiohttp
 
 from pybench.datasets import load_local_items
 from pybench.telemetry import RunTelemetry
-from pybench.workloads import hydrate_workload, load_workloads, paths, select_workloads, turn_count
+from pybench.workloads import hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, turn_count
 
 
 def utc_now() -> str:
@@ -313,7 +313,7 @@ async def run(config: dict[str, Any]) -> None:
 
         async def replay(unit_seq: int, scheduled_ms: float | None) -> None:
             unit = hydrate_workload(root, kind, units[unit_seq - 1])
-            for turn_index, turn in enumerate(unit["turns"], 1):
+            for turn_index, turn in enumerate(iter_workload_turns(unit), 1):
                 if turn_index > 1 and run_config.get("turn_delay_ms", 0):
                     await asyncio.sleep(run_config["turn_delay_ms"] / 1000)
                 seq = offsets[unit_seq - 1] + turn_index

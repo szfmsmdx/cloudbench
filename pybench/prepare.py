@@ -72,16 +72,17 @@ class Counter:
         turns = item["turns"]
         # Agent prefixes share history. Tokenize each message once rather than
         # repeatedly encoding every earlier message in a long conversation.
-        if len(turns) == 1:
+        if len(turns) == 1 and "end" not in turns[0]:
             turns[0]["input_tokens"] = self(turns[0])
             return
-        history = turns[-1]["messages"]
+        history = item["messages"][:turns[-1]["end"]] if "messages" in item else turns[-1]["messages"]
         prefix = [0]
         for message in history:
             prefix.append(prefix[-1] + len(self.encoding.encode_ordinary(json.dumps(message, ensure_ascii=False))) + 1)
-        frame = self({"messages": [], **({"tools": turns[0]["tools"]} if turns[0].get("tools") else {})})
+        tools = item.get("tools") or turns[0].get("tools")
+        frame = self({"messages": [], **({"tools": tools} if tools else {})})
         for turn in turns:
-            turn["input_tokens"] = frame + prefix[len(turn["messages"])]
+            turn["input_tokens"] = frame + prefix[turn["end"] if "end" in turn else len(turn["messages"])]
 
 
 def text_content(value: Any) -> str:
@@ -94,7 +95,7 @@ def text_content(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def agent_item(row: dict[str, Any], index: int, max_turns: int | None = None) -> dict[str, Any]:
+def agent_item(row: dict[str, Any], index: int, max_turns: int | None = None, compact: bool = False) -> dict[str, Any]:
     messages = row.get("messages", [])
     if isinstance(messages, str):
         messages = json.loads(messages)
@@ -117,7 +118,7 @@ def agent_item(row: dict[str, Any], index: int, max_turns: int | None = None) ->
             if pending_calls:
                 raise ValueError("原始工具返回不完整")
             if history and history[-1]["role"] in {"user", "tool"}:
-                turns.append({"messages": list(history), **({"tools": list(tools)} if tools else {})})
+                turns.append({"end": len(history)} if compact else {"messages": list(history), **({"tools": tools} if tools else {})})
                 if max_turns is not None and len(turns) >= max_turns:
                     break
             calls = []
@@ -149,10 +150,11 @@ def agent_item(row: dict[str, Any], index: int, max_turns: int | None = None) ->
         raise ValueError("轨迹没有可回放的 assistant 轮次")
     # Include the complete tool definitions in every prefix, including turn 1.
     for turn in turns:
-        if tools:
+        if tools and not compact:
             turn["tools"] = tools
     return {"id": str(row.get("trajectory_id") or row.get("traj_id") or row.get("instance_id") or index),
-            "turns": turns, "metadata": {"resolved": row.get("resolved"), "replay": "recorded_prefixes", "inferred_tools": inferred_tools}}
+            "turns": turns, **({"messages": history, "tools": tools} if compact else {}),
+            "metadata": {"resolved": row.get("resolved"), "replay": "recorded_prefixes", "inferred_tools": inferred_tools}}
 
 
 class PlainHTML(HTMLParser):
@@ -337,7 +339,7 @@ def prepare(root: Path, key: str, limit: int | None = None, max_turns: int | Non
             if limit is not None and index >= limit:
                 break
             try:
-                item = agent_item(row, index + offset, max_turns) if CATALOG[key]["category"] == "agent" else rag_item(key, row, index + offset)
+                item = agent_item(row, index + offset, max_turns, compact=True) if CATALOG[key]["category"] == "agent" else rag_item(key, row, index + offset)
                 counter.count_item(item)
                 writer.append(row, item)
             except (ValueError, KeyError, TypeError) as exc:
