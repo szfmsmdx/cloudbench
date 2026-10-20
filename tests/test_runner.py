@@ -3,13 +3,31 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from pybench.datasets import eligible_count, length_distribution, load_local_items
-from pybench.runner import schedule_requests
+from pybench.runner import run, schedule_requests
 from pybench.telemetry import RunTelemetry
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_unlimited_burst_starts_every_request_before_waiting_for_completion(self):
+        async def scenario():
+            release = asyncio.Event()
+            started = []
+            async def send(seq, planned):
+                self.assertEqual(planned, 0)
+                started.append(seq)
+                if len(started) == 128:
+                    release.set()
+                await release.wait()
+            await asyncio.wait_for(schedule_requests(128, 'async', 0, 0, send), 2)
+            self.assertEqual(len(started), 128)
+        asyncio.run(scenario())
+
     def test_sync_waits_for_each_request(self):
         async def scenario():
             starts = []
@@ -31,7 +49,7 @@ class SchedulerTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_qps_five_targets_200ms_without_waiting_for_completion(self):
+    def test_qps_five_targets_200ms_without_concurrency_limit(self):
         async def scenario():
             starts = []
 
@@ -39,7 +57,7 @@ class SchedulerTests(unittest.TestCase):
                 starts.append((asyncio.get_running_loop().time(), planned))
                 await asyncio.sleep(0.3)
 
-            await schedule_requests(4, "async", 5, 4, send)
+            await schedule_requests(4, "async", 5, 0, send)
             self.assertEqual([planned for _, planned in starts], [0.0, 200.0, 400.0, 600.0])
             for before, after in zip(starts, starts[1:]):
                 self.assertAlmostEqual(after[0] - before[0], 0.2, delta=0.055)
@@ -82,6 +100,45 @@ class SchedulerTests(unittest.TestCase):
                 self.assertGreaterEqual(after[0] - before[0], 0.05)
 
         asyncio.run(scenario())
+
+
+class UnlimitedHTTPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unlimited_mode_has_no_hidden_http_connection_cap(self):
+        count, peak, active, arrived = 128, 0, 0, 0
+        release = asyncio.Event()
+        events = []
+        async def respond(request):
+            nonlocal peak, active, arrived
+            await request.json()
+            active += 1
+            arrived += 1
+            peak = max(peak, active)
+            if arrived == count:
+                release.set()
+            await release.wait()
+            active -= 1
+            return web.json_response({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}],
+                                      'usage': {'prompt_tokens': 100, 'completion_tokens': 10}})
+        app = web.Application()
+        app.router.add_post('/v1/chat/completions', respond)
+        server = TestServer(app)
+        await server.start_server()
+        config = {'target': {'base_url': str(server.make_url('/v1')), 'model': 'mock'},
+                  'dataset': {'kind': 'public:hotpotqa', 'selected': [
+                      {'id': str(i), 'index': i, 'turns': [{'messages': [{'role': 'user', 'content': str(i)}], 'input_tokens': 100}]}
+                      for i in range(count)]},
+                  'run': {'mode': 'async', 'request_rate': 0, 'concurrency': 0, 'request_count': count,
+                          'unit_count': count, 'max_tokens': 10, 'request_timeout': 10, 'seed': 42}}
+        try:
+            with patch('pybench.runner.emit', events.append):
+                await asyncio.wait_for(run(config), 10)
+            self.assertEqual(peak, count)
+            samples = [e['sample'] for e in events if e['type'] == 'sample']
+            self.assertEqual(len(samples), count)
+            self.assertTrue(all(s['status'] == 'ok' for s in samples))
+        finally:
+            release.set()
+            await server.close()
 
 
 class LocalDatasetTests(unittest.TestCase):

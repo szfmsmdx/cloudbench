@@ -52,7 +52,7 @@ function renderMode() {
   const agent = state.datasets.find(d => d.id === $('#run-dataset').value)?.category === 'agent';
   $('#async-fields').hidden = !isAsync;
   $('#traffic-note').textContent = isAsync
-    ? `QPS按${agent ? '会话启动' : '请求'}计算；QPS=0尽快发起。并发限制${agent ? '活跃会话数，同会话逐轮等待完成' : '在途请求数'}，达到上限后实际速率可能降低。`
+    ? `QPS按${agent ? '会话启动' : '请求'}计算；QPS=0尽快发起。最大并发留空不限制；填写后限制${agent ? '活跃会话数，同会话逐轮等待完成' : '在途请求数'}。${agent ? '同会话始终逐轮执行。' : ''}`
     : `同步模式串行发送${agent ? '会话，同会话逐轮回放' : '请求'}，不设置目标 QPS。`;
   document.querySelectorAll('.mode-choice').forEach(el => el.classList.toggle('selected', el.querySelector('input').checked));
 }
@@ -94,7 +94,7 @@ function renderRun(data) {
   const { run, samples, summary: s } = data;
   $('#result-panel').hidden = false;
   $('#result-title').textContent = `${run.target_name} · ${run.model}`;
-  $('#result-subtitle').textContent = `${dateTime(run.started_at)} · ${run.dataset_name || '旧版提示词'} · ${run.mode === 'async' ? `异步 ${run.request_rate === 0 ? '突发' : `${run.request_rate} QPS`} / 并发 ${run.concurrency}` : '同步串行'} · ${run.request_count} 个请求`;
+  $('#result-subtitle').textContent = `${dateTime(run.started_at)} · ${run.dataset_name || '旧版提示词'} · ${run.mode === 'async' ? `异步 ${run.request_rate === 0 ? '突发' : `${run.request_rate} QPS`} / 并发${run.concurrency === 0 ? '不限制' : ` ${run.concurrency}`}` : '同步串行'} · ${run.request_count} 个请求`;
   if (run.unit_count && run.unit_count !== run.request_count) $('#result-subtitle').textContent += ` · ${run.unit_count} 个会话`;
   $('#run-status').textContent = ({ running: '测试运行中', completed: '测试完成', cancelled: '测试已停止', error: '测试失败' })[run.status] || run.status;
   $('#run-progress').textContent = `${s.completed} / ${run.request_count}`;

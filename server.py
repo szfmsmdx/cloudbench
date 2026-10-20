@@ -315,13 +315,13 @@ class CloudBench:
             units = available if units is None else units
             count = units
         concurrency = body.get("concurrency")
-        default_concurrency = min(units, 16) if dataset["kind"].startswith("public:") else min(units, 5000)
         run = {
             "id": str(uuid.uuid4()), "target_id": target["id"], "target_name": target["name"],
             "model": target["model"], "base_url": target["base_url"],
             "price_snapshot": json.dumps(price, ensure_ascii=False) if price else None,
             "prompt": dataset["name"], "max_tokens": output_limit,
-            "request_count": count, "concurrency": 1 if mode == "sync" else number(default_concurrency if concurrency is None or concurrency == "" else concurrency, "并发数", 1, 5000, True),
+            "request_count": count, "concurrency": 1 if mode == "sync" else (
+                0 if concurrency is None or concurrency == "" else number(concurrency, "并发数", 1, 1000000000, True)),
             "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
             "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,

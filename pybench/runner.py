@@ -220,8 +220,8 @@ async def schedule_requests(
     concurrency: int,
     send: Callable[[int, float | None], Awaitable[None]],
 ) -> None:
-    """Schedule at fixed intervals; QPS 0 fills the concurrency window ASAP."""
-    if mode not in {"sync", "async"} or count < 1 or concurrency < 1:
+    """QPS controls arrivals; concurrency=0 adds no in-flight limit."""
+    if mode not in {"sync", "async"} or count < 1 or concurrency < 0:
         raise ValueError("无效的测试调度参数")
     if mode == "async" and (qps is None or not math.isfinite(qps) or qps < 0):
         raise ValueError("异步 QPS 必须是非负数")
@@ -238,7 +238,7 @@ async def schedule_requests(
             delay = start + scheduled_ms / 1000 - loop.time()
             if delay > 0:
                 await asyncio.sleep(delay)
-        while len(pending) >= concurrency:
+        while concurrency and len(pending) >= concurrency:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
@@ -271,6 +271,7 @@ async def run(config: dict[str, Any]) -> None:
     order = list(range(len(items)))
     rng.shuffle(order)
     timeout = aiohttp.ClientTimeout(total=run_config.get("request_timeout", 120))
+    # aiohttp limit=0 disables its own connection cap as well as our scheduler's.
     connector = aiohttp.TCPConnector(limit=run_config["concurrency"])
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         loop = asyncio.get_running_loop()

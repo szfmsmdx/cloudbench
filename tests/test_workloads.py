@@ -292,6 +292,24 @@ class PublicWorkloadAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("不能通过重复", (await response.json())["error"])
         self.assertEqual(self.payloads, [])
 
+    async def test_blank_concurrency_is_unlimited_for_public_workloads(self):
+        for field in ({}, {'concurrency': ''}, {'concurrency': None}):
+            response = await self.client.post('/api/runs', json={'target_id': self.target['id'],
+                'dataset_id': 'public:open-swe', 'mode': 'async', 'request_rate': 0,
+                'request_count': 2, 'max_tokens': 128, **field})
+            self.assertEqual(response.status, 202, await response.text())
+            run_id = (await response.json())['id']
+            for _ in range(200):
+                result = await (await self.client.get(f'/api/runs/{run_id}')).json()
+                if result['run']['status'] != 'running':
+                    break
+                await asyncio.sleep(.05)
+            self.assertEqual(result['run']['status'], 'completed', result['run']['error'])
+            self.assertEqual(result['run']['concurrency'], 0)
+            self.assertEqual(result['summary']['success'], 4)
+            self.assertEqual(len({s['session_id'] for s in result['samples']}), 2)
+            self.assertEqual({s['turn_index'] for s in result['samples']}, {1, 2})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -152,7 +152,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         burst_result = await self.wait_finished(burst["id"])
         self.assertEqual(burst_result["run"]["status"], "completed", burst_result["run"]["error"])
         self.assertEqual(burst_result["summary"]["success"], 2)
-        self.assertEqual(burst_result["run"]["concurrency"], 2)
+        self.assertEqual(burst_result["run"]["concurrency"], 0)
         self.assertEqual(burst_result["run"]["arrival_pattern"], "burst")
         self.assertIsNone(burst_result["summary"]["actual_arrival_qps"])
         self.assertTrue(all(s["scheduled_offset_ms"] == 0 for s in burst_result["samples"]))
@@ -187,7 +187,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             result = await self.wait_finished(run["id"])
             self.assertEqual(result["run"]["status"], "cancelled")
             self.assertEqual(result["run"]["request_count"], expected_count)
-            self.assertEqual(result["run"]["concurrency"], expected_count)
+            self.assertEqual(result["run"]["concurrency"], 0)
             if dataset["kind"] == "local-longbench-v2":
                 self.assertLess(expected_count, 503)
             else:
