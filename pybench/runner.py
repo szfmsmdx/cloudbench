@@ -254,10 +254,16 @@ async def run(config: dict[str, Any]) -> None:
     kind = config["dataset"]["kind"]
     prepared = kind.startswith("public:")
     if prepared:
-        _, meta = paths(root, kind.removeprefix("public:"))
-        if json.loads(meta.read_text(encoding="utf-8"))["sha256"] != config["dataset"]["sha256"]:
-            raise ValueError("数据快照在创建测试后已变化，请重新创建测试")
-        units = select_workloads(load_workloads(root, kind, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0)), run_config["unit_count"], run_config["seed"])
+        if "selected" in config["dataset"]:
+            # All selected records were read, adapted and length-checked before
+            # the worker starts its clock. No corpus preparation during load.
+            units = config["dataset"]["selected"]
+        else:
+            _, meta = paths(root, kind.removeprefix("public:"))
+            if json.loads(meta.read_text(encoding="utf-8"))["sha256"] != config["dataset"]["sha256"]:
+                raise ValueError("数据快照在创建测试后已变化，请重新创建测试")
+            chosen = select_workloads(load_workloads(root, kind, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0)), run_config["unit_count"], run_config["seed"])
+            units = [hydrate_workload(root, kind, unit) for unit in chosen]
         items = units
     else:
         items = load_local_items(kind, root, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0))
@@ -312,7 +318,7 @@ async def run(config: dict[str, Any]) -> None:
                 raise ValueError("数据快照请求数与测试配置不一致")
 
         async def replay(unit_seq: int, scheduled_ms: float | None) -> None:
-            unit = hydrate_workload(root, kind, units[unit_seq - 1])
+            unit = units[unit_seq - 1]
             for turn_index, turn in enumerate(iter_workload_turns(unit), 1):
                 if turn_index > 1 and run_config.get("turn_delay_ms", 0):
                     await asyncio.sleep(run_config["turn_delay_ms"] / 1000)

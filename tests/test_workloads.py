@@ -13,7 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from pybench.prepare import agent_item, prepare, rag_item
 from pybench.sources import source_rows
-from pybench.workloads import IndexedWriter, catalog, hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, write_snapshot
+from pybench.workloads import IndexedWriter, catalog, hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, select_for_run, write_snapshot
 from server import create_app
 
 
@@ -49,7 +49,7 @@ class AdapterTests(unittest.TestCase):
             original = pq.read_table(source, columns=["patch"]).to_pylist()
             self.assertEqual(original[136]["patch"], "keep-original-patch" * 1000)
 
-    def test_default_preparation_imports_more_than_100_and_preserves_raw_records(self):
+    def test_default_preparation_keeps_full_source_without_tokenizing_or_indexing(self):
         class Counter:
             fingerprint, label = "fixture", "fixture tokens"
             def __init__(self, *args):
@@ -62,22 +62,18 @@ class AdapterTests(unittest.TestCase):
             source = root / "source.jsonl"
             source.write_text("".join(json.dumps({"_id": str(i), "question": f"q{i}", "answer": f"gold{i}",
                 "context": [["article", [f"evidence{i}"]]], "extra_original_field": i}) + "\n" for i in range(137)), encoding="utf-8")
-            with patch("pybench.prepare.Counter", Counter):
+            with patch("pybench.prepare.Counter", side_effect=AssertionError('Must not tokenize entire source')):
                 info = prepare(root, "hotpotqa", source=source)
             self.assertEqual((info["raw_count"], info["item_count"]), (137, 137))
             self.assertTrue(info["complete"])
-            self.assertIsNone(info["max_turns"])
-            units = load_workloads(root, "public:hotpotqa", 4096, 128)
+            self.assertFalse((root / 'datasets/prepared/hotpotqa.sqlite3').exists())
+            with patch('pybench.prepare.Counter', Counter):
+                units = select_for_run(root, 'public:hotpotqa', 4096, 128, 0, None, 42)
             self.assertEqual(len(units), 137)
-            self.assertNotIn("turns", units[136])
-            self.assertEqual(units[136]["turn_count"], 1)
-            item = hydrate_workload(root, "public:hotpotqa", units[136])
+            item = next(item for item in units if item['index'] == 136)
             self.assertIn("evidence136", json.dumps(item["turns"]))
             self.assertNotIn("gold136", json.dumps(item["turns"]))
-            import sqlite3, zlib
-            data, _ = paths(root, "hotpotqa")
-            with closing(sqlite3.connect(data)) as db:
-                raw = json.loads(zlib.decompress(db.execute("SELECT raw_record FROM workloads WHERE idx=136").fetchone()[0]))
+            raw = list(map(json.loads, (root / 'datasets/raw/hotpotqa/source.jsonl').read_text().splitlines()))[136]
             self.assertEqual(raw["extra_original_field"], 136)
             self.assertEqual(raw["answer"], "gold136")
 

@@ -1,4 +1,4 @@
-"""Prepare complete source partitions; sampling requires an explicit --limit.
+"""Download complete original source partitions; adapt selected records when testing.
 
 python -m pybench.prepare all
 No dataset-provided code or recorded tool command is executed.
@@ -12,15 +12,13 @@ import bz2
 import hashlib
 import json
 import sys
-import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterator
 
-from pybench.workloads import CATALOG, IndexedWriter
+from pybench.workloads import CATALOG
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -251,129 +249,46 @@ def local_rows(path: Path) -> Iterator[dict[str, Any]]:
                             yield {**row, "task": task}
 
 
-def remote_rows(key: str, limit: int, offset: int) -> Iterator[dict[str, Any]]:
-    if key in {"open-swe", "swe-smith"}:
-        dataset, config, split = ("nvidia/Open-SWE-Traces", "v1.2", "minisweagent") if key == "open-swe" else ("SWE-bench/SWE-smith-trajectories", "default", "tool")
-        # Viewer pages are bounded. Persisted normalized snapshots do not depend on the viewer at runtime.
-        for start in range(offset, offset + limit, 10):
-            query = urllib.parse.urlencode({"dataset": dataset, "config": config, "split": split, "offset": start, "length": min(10, offset + limit - start)})
-            page = json_url("https://datasets-server.huggingface.co/rows?" + query)
-            if not page.get("rows"):
-                return
-            for record in page["rows"]:
-                if record.get("truncated_cells"):
-                    raise ValueError("HF Viewer 返回截断字段，请用 --input 提供完整原始 JSON/JSONL")
-                yield record["row"]
-        return
-    if key == "hotpotqa":
-        for start in range(offset, offset + limit, 100):
-            query = urllib.parse.urlencode({"dataset": "hotpotqa/hotpot_qa", "config": "distractor", "split": "validation", "offset": start, "length": min(100, offset + limit - start)})
-            for record in json_url("https://datasets-server.huggingface.co/rows?" + query)["rows"]:
-                if record.get("truncated_cells"):
-                    raise ValueError("HotpotQA 返回截断字段，请提供完整原始数据")
-                yield record["row"]
-        return
-    if key == "crag":
-        url = "https://media.githubusercontent.com/media/facebookresearch/CRAG/main/data/crag_task_1_and_2_dev_v4.jsonl.bz2"
-        with open_url(url) as response, bz2.BZ2File(response) as stream:
-            for index, line in enumerate(stream):
-                if index >= offset + limit:
-                    break
-                if index >= offset:
-                    yield json.loads(line)
-        return
-    url = "https://raw.githubusercontent.com/IAAR-Shanghai/CRUD_RAG/main/data/crud_split/split_merged.json"
-    cache = ROOT / "datasets" / "raw" / "crud-rag" / "split_merged.json"
-    if not cache.is_file():
-        import shutil
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        temp = cache.with_suffix(".download")
-        with open_url(url) as response, temp.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        # A failed/corrupt download must not become the cache.
-        json.loads(temp.read_text(encoding="utf-8"))
-        temp.replace(cache)
-    raw = json.loads(cache.read_text(encoding="utf-8"))
-    # Interleave task families instead of taking only summaries from the first key.
-    index = 0
-    for position in range(max(len(rows) for rows in raw.values())):
-        for task, rows in raw.items():
-            if position >= len(rows):
-                continue
-            if index >= offset + limit:
-                return
-            if index >= offset:
-                yield {**rows[position], "task": task}
-            index += 1
-
-
-def prepare(root: Path, key: str, limit: int | None = None, max_turns: int | None = None, tokenizer: str = "kimi-k3", source: Path | None = None, offset: int = 0, manifest_path: Path | None = None, endpoint: str | None = None) -> dict[str, Any]:
-    if key not in CATALOG or (limit is not None and limit < 1) or (max_turns is not None and max_turns < 1) or offset < 0:
-        raise ValueError("无效的数据准备参数")
-    progress_file = root / "datasets" / "prepared" / f"{key}.progress.json"
-    progress_file.parent.mkdir(parents=True, exist_ok=True)
-    progress_info = {}
-    def progress(**values):
-        progress_info.update(values, updated_at=datetime.now(timezone.utc).isoformat())
-        temp = progress_file.with_suffix(".tmp")
-        temp.write_text(json.dumps(progress_info, ensure_ascii=False), encoding="utf-8")
-        temp.replace(progress_file)
-
-    counter = Counter(root, tokenizer)
-    manifest = None
+def prepare(root: Path, key: str, source: Path | None = None, manifest_path: Path | None = None, endpoint: str | None = None) -> dict[str, Any]:
+    """Keep originals and their manifest. Do not tokenize or convert the corpus."""
+    import shutil
+    from pybench.raw_workloads import manifest_path as source_path, source_info
+    from pybench.sources import source_manifest, download_source, file_hash
+    if key not in CATALOG:
+        raise ValueError("未知公开数据集")
     if source:
-        from itertools import islice
-        rows = islice(local_rows(source), offset, None if limit is None else offset + limit)
-    elif limit is None:
-        from pybench.sources import source_manifest, download_source, source_rows
-        cached = root / "datasets" / "raw" / key / "source-manifest.json"
-        manifest = json.loads((manifest_path or cached).read_text(encoding="utf-8")) if (manifest_path or cached).is_file() else source_manifest(key)
+        source = source.resolve()
+        directory = root / "datasets" / "raw" / key
+        directory.mkdir(parents=True, exist_ok=True)
+        dest = directory / source.name
+        if source != dest.resolve():
+            shutil.copyfile(source, dest)
+        if dest.suffix == ".parquet":
+            import pyarrow.parquet as pq
+            total = pq.ParquetFile(dest).metadata.num_rows
+            format = "parquet"
+        else:
+            total = sum(1 for _ in local_rows(dest))
+            format = "jsonl.bz2" if dest.suffix == ".bz2" else ("jsonl" if ".jsonl" in dest.name else "json")
+        manifest = {"key": key, "scope": source.name, "format": format, "expected_rows": total,
+                    "files": [{"filename": dest.name, "size": dest.stat().st_size, "sha256": file_hash(dest)}]}
+        source_path(root, key).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    else:
+        cached = source_path(root, key)
+        path = manifest_path or cached
+        manifest = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else source_manifest(key)
         if manifest["key"] != key:
             raise ValueError("来源清单与数据集不匹配")
-        progress(scope=manifest["scope"], expected_rows=manifest.get("expected_rows"), status="downloading")
-        manifest = download_source(root, key, manifest, endpoint, progress)
-        rows = source_rows(root, key, manifest)
-    else:
-        rows = remote_rows(key, limit, offset)
-    writer = IndexedWriter(root, key)
-    skipped, errors = 0, []
-    progress(status="indexing", rows=0, accepted=0)
-    try:
-        for index, row in enumerate(rows):
-            if limit is not None and index >= limit:
-                break
-            try:
-                item = agent_item(row, index + offset, max_turns, compact=True) if CATALOG[key]["category"] == "agent" else rag_item(key, row, index + offset)
-                counter.count_item(item)
-                writer.append(row, item)
-            except (ValueError, KeyError, TypeError) as exc:
-                skipped += 1
-                writer.append(row, error=str(exc)[:300])
-                if len(errors) < 20:
-                    errors.append({"row": index + offset, "reason": str(exc)[:160]})
-            if writer.rows % 100 == 0:
-                progress(status="indexing", rows=writer.rows, accepted=writer.accepted)
-                print(f"{key}: indexed {writer.rows} raw records, {writer.accepted} usable", flush=True)
-        if not writer.accepted:
-            raise ValueError(f"没有转换成功的样本；前3条错误：{errors[:3]}")
-        if manifest and manifest.get("expected_rows") is not None and writer.rows != manifest["expected_rows"]:
-            raise ValueError(f"来源记录数不完整：{writer.rows}/{manifest['expected_rows']}；原快照未替换")
-        info = writer.finish({"source": CATALOG[key]["source"], "source_file": source.name if source else None,
-            "scope": manifest["scope"] if manifest else (str(source.name) if source else "显式抽样"),
-            "source_manifest": manifest, "source_total": manifest.get("expected_rows", writer.rows) if manifest else writer.rows,
-            "complete": limit is None and max_turns is None and offset == 0,
-            "prepared_at": datetime.now(timezone.utc).isoformat(), "sampling": "complete source partition" if limit is None else "explicit bounded slice",
-            "offset": offset, "requested_rows": limit, "max_turns": max_turns,
-            "tokenizer": tokenizer, "tokenizer_sha256": counter.fingerprint, "length_label": counter.label + "；多轮按消息累加参考",
-            "skipped_count": skipped, "skipped": errors, "raw_records_preserved": True,
-            "raw_storage": "完整原始文件保留于 datasets/raw；索引保存回放字段和源记录位置" if manifest else "完整输入记录保留于索引",
-            "reference_answers_sent": False})
-        progress(status="complete", rows=info["raw_count"], accepted=info["item_count"])
-        return info
-    except BaseException as exc:
-        writer.close()
-        progress(status="error", rows=writer.rows, accepted=writer.accepted, error=str(exc)[:300])
-        raise
+        manifest = download_source(root, key, manifest, endpoint)
+        if not manifest.get("expected_rows"):
+            # Older manifests for these exact public files predate row counts.
+            manifest["expected_rows"] = sum(1 for spec in manifest["files"] for _ in
+                                            local_rows(cached.parent / spec["filename"]))
+            cached.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    info = source_info(root, key)
+    if not info:
+        raise ValueError("完整原始文件尚未准备")
+    return info
 
 
 def main():
@@ -382,12 +297,8 @@ def main():
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", choices=[*CATALOG, "all"])
-    parser.add_argument("--limit", type=int, help="仅在显式指定时抽样；默认导入完整来源")
-    parser.add_argument("--max-turns", type=int, help="仅在显式指定时限制会话轮数；默认保留全部轮次")
-    parser.add_argument("--offset", type=int, default=0)
-    parser.add_argument("--tokenizer", default="kimi-k3", help="kimi-k3 或 tiktoken encoding 名称")
-    parser.add_argument("--input", type=Path, help="本地原始 JSON/JSONL/JSONL.bz2")
-    parser.add_argument("--manifest", type=Path, help="官方完整文件清单，可在可访问 HF 的机器生成")
+    parser.add_argument("--input", type=Path, help="导入完整本地原始 JSON/JSONL/JSONL.bz2/Parquet")
+    parser.add_argument("--manifest", type=Path, help="官方完整文件清单")
     parser.add_argument("--endpoint", help="HF 文件下载镜像，例如 https://hf-mirror.com")
     args = parser.parse_args()
     if (args.input or args.manifest) and args.dataset == "all":
@@ -395,8 +306,8 @@ def main():
     failed = False
     for key in CATALOG if args.dataset == "all" else [args.dataset]:
         try:
-            info = prepare(ROOT, key, args.limit, args.max_turns, args.tokenizer, args.input, args.offset, args.manifest, args.endpoint)
-            print(f"{key}: {info['item_count']} samples/sessions, {info['request_total']} requests, skipped={info['skipped_count']}", flush=True)
+            info = prepare(ROOT, key, source=args.input, manifest_path=args.manifest, endpoint=args.endpoint)
+            print(f"{key}: {info['source_total']} original records ready; no full token/index build", flush=True)
         except Exception as exc:
             failed = True
             print(f"{key}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)

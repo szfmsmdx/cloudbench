@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from pybench.datasets import eligible_count, length_distribution, token_counts
-from pybench.workloads import catalog, load_workloads, select_workloads, turn_count
+from pybench.workloads import catalog, select_for_run, turn_count
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
 
 ROOT = Path(__file__).resolve().parent
@@ -269,7 +269,7 @@ class CloudBench:
         return json_response(price, 201)
 
     async def create_run(self, request: web.Request) -> web.Response:
-        if self.active:
+        if self.active or getattr(self, 'preparing', False):
             raise ApiError("已有测试正在运行，请等待或取消", 409)
         body = await body_json(request)
         target = self.one("SELECT * FROM targets WHERE id=?", (body.get("target_id"),))
@@ -297,10 +297,17 @@ class CloudBench:
         turn_delay = number(body.get("turn_delay_ms") or 0, "轮间等待", 0, 60000)
         requested_count = body.get("request_count")
         units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 1000000000, True)
+        if self.active or getattr(self, 'preparing', False):
+            raise ApiError("已有测试正在准备或运行，请等待或取消", 409)
         if dataset["kind"].startswith("public:"):
-            selected = select_workloads(load_workloads(self.root, dataset["kind"], context_limit, output_limit, minimum), units, seed)
+            self.preparing = True
+            try:
+                selected = await asyncio.to_thread(select_for_run, self.root, dataset["kind"], context_limit, output_limit, minimum, units, seed)
+            finally:
+                self.preparing = False
             units = len(selected)
             count = sum(turn_count(item) for item in selected)
+            dataset = {**dataset, "selected": selected}
         else:
             available = eligible_count(dataset["kind"], self.root, context_limit, output_limit, minimum)
             if units is not None and units > available:
@@ -366,6 +373,8 @@ class CloudBench:
                 config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None},
                           "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms")},
                           "dataset": {"kind": dataset["kind"], "sha256": dataset.get("sha256"), "root": str(self.root)}, "price": price}
+                if "selected" in dataset:
+                    config["dataset"]["selected"] = dataset["selected"]
                 config["run"]["include_usage"] = bool(run["include_usage"])
                 process.stdin.write(json.dumps(config, ensure_ascii=False).encode("utf-8"))
                 await process.stdin.drain()

@@ -34,12 +34,20 @@ def paths(root: Path, key: str) -> tuple[Path, Path]:
 
 
 def catalog(root: Path) -> list[dict[str, Any]]:
+    from pybench.raw_workloads import source_info
     result = []
     for key, spec in CATALOG.items():
         data, meta = paths(root, key)
         info = json.loads(meta.read_text(encoding="utf-8")) if data.is_file() and meta.is_file() else {}
+        # Completed existing indexes remain readable. Original files are enough
+        # for new datasets: no full token/index build is required.
+        raw = source_info(root, key) if not info.get("complete") else None
+        if raw:
+            info = raw
         progress_file = root / "datasets" / "prepared" / f"{key}.progress.json"
         progress = json.loads(progress_file.read_text(encoding="utf-8")) if progress_file.is_file() else None
+        if raw:
+            progress = None
         result.append({**spec, **info, "id": f"public:{key}", "kind": f"public:{key}", "preparation": progress,
                        "ready": bool(info) and not (progress and progress.get("status") != "complete" and not info.get("complete")),
                        "source_total": info.get("source_total") or (progress or {}).get("expected_rows"),
@@ -48,6 +56,16 @@ def catalog(root: Path) -> list[dict[str, Any]]:
                        "length_label": info.get("length_label", "尚未准备"),
                        "unit": "会话" if spec["category"] == "agent" else "样本"})
     return result
+
+
+def select_for_run(root: Path, kind: str, context: int, output: int, minimum: int, count, seed: int):
+    """Freeze selected inputs before any benchmark timing or network request."""
+    from pybench.raw_workloads import select_raw
+    info = next(d for d in catalog(root) if d['kind'] == kind)
+    if info.get('format') == 'raw-source-v1':
+        return select_raw(root, kind.removeprefix('public:'), context, output, minimum, count, seed)
+    chosen = select_workloads(load_workloads(root, kind, context, output, minimum), count, seed)
+    return [hydrate_workload(root, kind, unit) for unit in chosen]
 
 
 def load_workloads(root: Path, kind: str, context: int, output: int, minimum: int = 0) -> list[dict[str, Any]]:

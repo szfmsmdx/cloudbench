@@ -34,11 +34,11 @@ def source_manifest(key):
         return {"key": key, "scope": f"{dataset} / {config} / {split}", "expected_rows": size["num_rows"],
                 "format": "parquet", "files": files}
     if key == "crag":
-        return {"key": key, "scope": "CRAG Task 1/2 dev v4（完整公开文件）", "format": "jsonl.bz2",
+        return {"key": key, "scope": "CRAG Task 1/2 dev v4（完整公开文件）", "format": "jsonl.bz2", "expected_rows": 2706,
                 "files": [{"filename": "crag_task_1_and_2_dev_v4.jsonl.bz2", "size": 739384484,
                     "sha256": "afa29f2b3facfb5d15aa9cded00d5ec90ff76f3e67279e7b99cfe86659a641ca",
                     "url": "https://media.githubusercontent.com/media/facebookresearch/CRAG/main/data/crag_task_1_and_2_dev_v4.jsonl.bz2"}]}
-    return {"key": key, "scope": "CRUD-RAG crud_split/split_merged.json（完整六类任务）", "format": "json",
+    return {"key": key, "scope": "CRUD-RAG crud_split/split_merged.json（完整六类任务）", "format": "json", "expected_rows": 7661,
             "files": [{"filename": "split_merged.json", "url": "https://raw.githubusercontent.com/IAAR-Shanghai/CRUD_RAG/main/data/crud_split/split_merged.json"}]}
 
 
