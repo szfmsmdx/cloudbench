@@ -108,7 +108,7 @@ def source_rows(root, key, manifest):
         if manifest["format"] == "parquet":
             import pyarrow.parquet as pq
             # Keep only a few complete rows in memory; agent rows may be large.
-            for batch in pq.ParquetFile(path).iter_batches(batch_size=8):
+            for batch in pq.ParquetFile(path, pre_buffer=False).iter_batches(batch_size=1, use_threads=False):
                 yield from batch.to_pylist()
         elif manifest["format"] == "jsonl.bz2":
             with bz2.open(path, "rt", encoding="utf-8") as stream:
