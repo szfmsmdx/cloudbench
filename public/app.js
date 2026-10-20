@@ -27,28 +27,30 @@ function view(name) {
 }
 function setSelectOptions(select, items, placeholder, label) {
   const old = select.value;
-  select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + items.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join('');
+  select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + items.map(item => `<option value="${escapeHtml(item.id)}" ${item.ready === false ? 'disabled' : ''}>${escapeHtml(label(item))}</option>`).join('');
   if (items.some(item => item.id === old)) select.value = old;
 }
 function renderDatasetInfo() {
   const dataset = state.datasets.find(d => d.id === $('#run-dataset').value);
-  $('#local-options').hidden = !dataset?.kind?.startsWith('local-');
+  $('#local-options').hidden = !dataset;
   const distribution = (dataset?.distribution || []).filter(row => row.count > 0);
   const largest = Math.max(1, ...distribution.map(row => row.count));
   $('#dataset-info').innerHTML = dataset
-    ? `<div class="dataset-summary"><div class="dataset-summary-name"><strong>${escapeHtml(dataset.name)}</strong><span>${fmt(dataset.item_count, 0)} 条样本</span></div>
+    ? `<div class="dataset-summary"><div class="dataset-summary-name"><strong>${escapeHtml(dataset.name)}</strong><span>${fmt(dataset.item_count, 0)} ${escapeHtml(dataset.unit || '样本')}${dataset.category === 'agent' ? ` · ${fmt(dataset.request_total, 0)} 个逐轮请求` : ''}</span></div>
        <div class="dataset-hover"><button type="button" class="dataset-info-trigger" aria-describedby="dataset-distribution-popup">Token 分布 <span aria-hidden="true">ⓘ</span></button>
-       <div id="dataset-distribution-popup" class="dataset-popover" role="tooltip"><div class="dataset-popover-title"><strong>输入 Token 长度分布</strong><span>${fmt(dataset.item_count, 0)} 条</span></div>
+       <div id="dataset-distribution-popup" class="dataset-popover" role="tooltip"><div class="dataset-popover-title"><strong>输入长度分布</strong><span>${fmt(dataset.request_total || dataset.item_count, 0)} 个请求</span></div>
        <div class="dataset-histogram">${distribution.map(row => `<div class="dataset-histogram-row"><span>${escapeHtml(row.range)}</span><span class="dataset-histogram-track" aria-hidden="true"><i style="width:${row.count / largest * 100}%"></i></span><span class="dataset-histogram-value">${fmt(row.count, 0)} · ${fmt(row.percentage, 2)}%</span></div>`).join('')}</div>
-       <small>Kimi K3 分词口径 · 1K = 1024 tokens</small></div></div></div>`
-    : '选择数据集后显示长度分布。';
+       <small>${escapeHtml(dataset.length_label || 'Kimi K3 token')} · 1K = 1024</small></div></div></div><p>${escapeHtml(dataset.description || '')}${dataset.category === 'agent' ? ' 条数、QPS和并发按会话计算；逐轮发送原始历史，不执行工具。' : ''}</p>`
+    : '选择已准备的数据集后显示长度分布。公开数据准备方式见 README。';
+  renderMode();
 }
 function renderMode() {
   const isAsync = $('#run-form').elements.mode.value === 'async';
+  const agent = state.datasets.find(d => d.id === $('#run-dataset').value)?.category === 'agent';
   $('#async-fields').hidden = !isAsync;
   $('#traffic-note').textContent = isAsync
-    ? 'QPS=5：每 200 ms 计划发起一条；QPS=0：不设发送间隔，尽快全部发起。填写最大并发数后，达到上限会等待请求完成。'
-    : '同步模式会以并发 1 串行发送，不设置目标 QPS。';
+    ? `QPS按${agent ? '会话启动' : '请求'}计算；QPS=0尽快发起。并发限制${agent ? '活跃会话数，同会话逐轮等待完成' : '在途请求数'}，达到上限后实际速率可能降低。`
+    : `同步模式串行发送${agent ? '会话，同会话逐轮回放' : '请求'}，不设置目标 QPS。`;
   document.querySelectorAll('.mode-choice').forEach(el => el.classList.toggle('selected', el.querySelector('input').checked));
 }
 function statusHtml(status) {
@@ -64,8 +66,8 @@ function renderState() {
   $('#price-count').textContent = state.prices.length;
   setSelectOptions($('#run-target'), state.targets, state.targets.length ? '请选择端点' : '请先添加端点', t => `${t.name} · ${t.model}`);
   setSelectOptions($('#run-price'), state.prices, '不计算 token 费用', p => `${p.provider} / ${p.model} · ${p.currency}`);
-  setSelectOptions($('#run-dataset'), state.datasets, '请选择数据集', d => `${d.name} · ${d.item_count} 条`);
-  if (!$('#run-dataset').value && state.datasets.length) $('#run-dataset').value = state.datasets.find(d => d.id === 'local:longbench')?.id || state.datasets[0].id;
+  setSelectOptions($('#run-dataset'), state.datasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? '未准备' : `${d.item_count} ${d.unit || '样本'}`}`);
+  if (!$('#run-dataset').value) $('#run-dataset').value = state.datasets.find(d => d.ready !== false)?.id || '';
   renderDatasetInfo();
   $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)}</small><div class="target-actions"><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
   $('#price-rows').innerHTML = state.prices.length ? state.prices.map(p => `<tr><td><strong>${escapeHtml(p.provider)}</strong><small>${escapeHtml(p.model)}</small></td><td>${fmt(p.input_price, 6)}</td><td>${fmt(p.cache_read_price, 6)}</td><td>${fmt(p.cache_write_price, 6)}</td><td>${fmt(p.output_price, 6)}</td><td>${escapeHtml(p.currency)}</td><td>${escapeHtml(p.checked_at)}</td><td>${p.source_url ? `<a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">查看 ↗</a>` : '—'}</td></tr>`).join('') : '<tr><td colspan="8"><div class="empty">暂无价格。录入后可在创建测试时选择。</div></td></tr>';
@@ -86,6 +88,7 @@ function renderRun(data) {
   $('#result-panel').hidden = false;
   $('#result-title').textContent = `${run.target_name} · ${run.model}`;
   $('#result-subtitle').textContent = `${dateTime(run.started_at)} · ${run.dataset_name || '旧版提示词'} · ${run.mode === 'async' ? `异步 ${run.request_rate === 0 ? '突发' : `${run.request_rate} QPS`} / 并发 ${run.concurrency}` : '同步串行'} · ${run.request_count} 个请求`;
+  if (run.unit_count && run.unit_count !== run.request_count) $('#result-subtitle').textContent += ` · ${run.unit_count} 个会话`;
   $('#run-status').textContent = ({ running: '测试运行中', completed: '测试完成', cancelled: '测试已停止', error: '测试失败' })[run.status] || run.status;
   $('#run-progress').textContent = `${s.completed} / ${run.request_count}`;
   $('#run-progress-bar').style.width = `${Math.min(100, s.completed / run.request_count * 100)}%`;
@@ -108,6 +111,11 @@ function renderRun(data) {
     metric('本次硬件成本', s.hardware_run_cost == null ? '—' : fmt(s.hardware_run_cost, 6), run.gpu_currency || '', s.hardware_per_1m_output == null ? '尚无输出 token 数据' : `每百万输出 token：${fmt(s.hardware_per_1m_output, 2)}`)
   ].join('');
   let note = 'TTFT 为客户端观测的首个有效输出片段；TPOT 需服务端返回输出 token 用量。';
+  if (run.dataset_id?.startsWith('public:')) {
+    const snapshot = JSON.parse(run.dataset_snapshot || '{}');
+    note += ` 长度口径：${snapshot.length_label || '未知'}；实际token以服务端usage为准。`;
+    if (run.unit_count !== run.request_count) note += ' 固定轨迹仅测性能，生成结果不接入后续历史；到达率按会话首轮统计。';
+  }
   if (s.cache_hit_rate == null) note += ' 当前端点未提供可用的缓存 token 用量，命中率显示未知。';
   if (s.estimated_cost == null && run.price_snapshot) note += ' 费用信息不完整，暂不计算总价。';
   if (s.hardware_run_cost != null) note += ' 硬件成本按整个测试窗口的全部 GPU 计费，受当前并发和输出长度影响。';

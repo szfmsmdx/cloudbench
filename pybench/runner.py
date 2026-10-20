@@ -22,6 +22,7 @@ import aiohttp
 
 from pybench.datasets import load_local_items
 from pybench.telemetry import RunTelemetry
+from pybench.workloads import load_workloads, paths, select_workloads
 
 
 def utc_now() -> str:
@@ -90,7 +91,7 @@ def estimate_cost(usage: dict[str, Any], price: dict[str, Any] | None) -> float 
 def has_output(chunk: dict[str, Any]) -> bool:
     for choice in chunk.get("choices") or []:
         delta = choice.get("delta") or {}
-        if delta.get("content") or delta.get("reasoning_content"):
+        if delta.get("content") or delta.get("reasoning_content") or delta.get("reasoning") or delta.get("tool_calls"):
             return True
     return bool(chunk.get("output"))
 
@@ -114,6 +115,7 @@ async def measure_request(
     http_status: int | None = None
     error: str | None = None
     output_seen = False
+    finish_reason = None
     target, run = config["target"], config["run"]
     key = target.get("api_key") or ""
     payload = {
@@ -122,6 +124,8 @@ async def measure_request(
         "max_tokens": run["max_tokens"],
         "stream": True,
     }
+    if item.get("tools"):
+        payload["tools"] = item["tools"]
     if run.get("include_usage", True):
         payload["stream_options"] = {"include_usage": True}
     headers = {"Content-Type": "application/json"}
@@ -138,7 +142,7 @@ async def measure_request(
                 buffer = ""
 
                 def consume(event: str) -> None:
-                    nonlocal first_output, usage, output_seen
+                    nonlocal first_output, usage, output_seen, finish_reason
                     data = "\n".join(line[5:].lstrip() for line in event.splitlines() if line.startswith("data:"))
                     if not data or data == "[DONE]":
                         return
@@ -149,6 +153,8 @@ async def measure_request(
                     if chunk.get("error"):
                         detail = chunk["error"]
                         raise RuntimeError(str(detail.get("message", detail)) if isinstance(detail, dict) else str(detail))
+                    for choice in chunk.get("choices") or []:
+                        finish_reason = choice.get("finish_reason") or finish_reason
                     if chunk.get("usage"):
                         usage = chunk["usage"]
                         if on_progress:
@@ -171,7 +177,10 @@ async def measure_request(
             else:
                 body = await response.json()
                 usage = body.get("usage")
-                output_seen = bool((body.get("choices") or [{}])[0].get("message", {}).get("content"))
+                choice = (body.get("choices") or [{}])[0]
+                message = choice.get("message", {})
+                finish_reason = choice.get("finish_reason")
+                output_seen = bool(message.get("content") or message.get("tool_calls") or message.get("reasoning_content") or message.get("reasoning"))
             if not output_seen:
                 raise RuntimeError("响应没有生成内容")
     except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:
@@ -193,6 +202,8 @@ async def measure_request(
         "e2e_ms": round(e2e, 2),
         "tpot_ms": round(tpot, 2) if tpot is not None else None,
         "dataset_item_index": item["index"],
+        "session_id": item.get("session_id"), "turn_index": item.get("turn_index"),
+        "source_item_id": item.get("source_item_id"), "finish_reason": finish_reason,
         "scheduled_offset_ms": round(scheduled_offset_ms, 2) if scheduled_offset_ms is not None else None,
         "sent_offset_ms": round(sent_offset_ms, 2),
         "queue_delay_ms": round(max(0, sent_offset_ms - scheduled_offset_ms), 2) if scheduled_offset_ms is not None else None,
@@ -239,14 +250,21 @@ async def schedule_requests(
 
 async def run(config: dict[str, Any]) -> None:
     run_config = config["run"]
-    items = load_local_items(
-        config["dataset"]["kind"], Path(__file__).resolve().parent.parent,
-        run_config["max_input_tokens"], run_config["max_tokens"],
-    )
+    root = Path(config["dataset"].get("root") or Path(__file__).resolve().parent.parent)
+    kind = config["dataset"]["kind"]
+    prepared = kind.startswith("public:")
+    if prepared:
+        _, meta = paths(root, kind.removeprefix("public:"))
+        if json.loads(meta.read_text(encoding="utf-8"))["sha256"] != config["dataset"]["sha256"]:
+            raise ValueError("数据快照在创建测试后已变化，请重新创建测试")
+        units = select_workloads(load_workloads(root, kind, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0)), run_config["unit_count"], run_config["seed"])
+        items = units
+    else:
+        items = load_local_items(kind, root, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0))
     rng = random.Random(run_config.get("seed", 42))
     order = list(range(len(items)))
     rng.shuffle(order)
-    timeout = aiohttp.ClientTimeout(total=120)
+    timeout = aiohttp.ClientTimeout(total=run_config.get("request_timeout", 120))
     connector = aiohttp.TCPConnector(limit=run_config["concurrency"])
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         loop = asyncio.get_running_loop()
@@ -284,13 +302,37 @@ async def run(config: dict[str, Any]) -> None:
             telemetry.request_finished(sample)
             emit({"type": "sample", "sample": sample})
 
+        offsets = []
+        if prepared:
+            total = 0
+            for unit in units:
+                offsets.append(total)
+                total += len(unit["turns"])
+            if total != run_config["request_count"]:
+                raise ValueError("数据快照请求数与测试配置不一致")
+
+        async def replay(unit_seq: int, scheduled_ms: float | None) -> None:
+            unit = units[unit_seq - 1]
+            for turn_index, turn in enumerate(unit["turns"], 1):
+                if turn_index > 1 and run_config.get("turn_delay_ms", 0):
+                    await asyncio.sleep(run_config["turn_delay_ms"] / 1000)
+                seq = offsets[unit_seq - 1] + turn_index
+                item = {**turn, "index": unit["index"], "source_item_id": unit["id"],
+                        "session_id": f"{unit_seq}:{unit['id']}", "turn_index": turn_index}
+                telemetry.request_started()
+                sample = await measure_request(session, config, item, seq, run_start,
+                    scheduled_ms if turn_index == 1 else None,
+                    lambda tokens, output: telemetry.progress(seq, tokens, output))
+                telemetry.request_finished(sample)
+                emit({"type": "sample", "sample": sample})
+
         try:
             await schedule_requests(
-                run_config["request_count"],
+                len(units) if prepared else run_config["request_count"],
                 run_config["mode"],
                 run_config.get("request_rate"),
                 run_config["concurrency"],
-                send,
+                replay if prepared else send,
             )
         finally:
             stop_sampling.set()

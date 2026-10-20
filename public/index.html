@@ -48,7 +48,8 @@
             <label>选择数据集<select name="dataset_id" id="run-dataset" required><option value="">请选择数据集</option></select></label>
             <div class="dataset-info" id="dataset-info">选择数据集后显示长度分布。</div>
             <label id="local-options" hidden>模型上下文上限 / K <span class="hint">1K = 1024 tokens；1024K = 1M</span><input name="context_limit_k" type="number" min="2" max="4096" step="1" value="128"></label>
-            <label>测试条数 <span class="hint">留空＝全量，按上下文上限筛选</span><input name="request_count" type="number" min="1" max="5000" placeholder="可选，例如 100"></label>
+            <label>测试条数 / Agent会话数 <span class="hint">留空＝已准备的合格样本各一次</span><input name="request_count" type="number" min="1" max="5000" placeholder="可选，例如 100"></label>
+            <div class="field-row three"><label>最短输入 / 参考tokens<input name="min_input_tokens" type="number" min="0" value="0"></label><label>单请求超时 / 秒<input name="request_timeout" type="number" min="1" max="7200" value="900"></label><label>Agent轮间等待 / ms<input name="turn_delay_ms" type="number" min="0" max="60000" value="0"></label></div>
             <div class="form-divider"><span>02</span><strong>发压方式</strong><small>TRAFFIC</small></div>
             <div class="mode-switch" role="radiogroup" aria-label="发压方式"><label class="mode-choice"><input type="radio" name="mode" value="sync" checked><span><strong>同步串行</strong><small>每个请求完成后再发送下一个</small></span></label><label class="mode-choice"><input type="radio" name="mode" value="async"><span><strong>异步按 QPS</strong><small>指定到达速率与最大在途请求数</small></span></label></div>
             <div class="field-row async-fields" id="async-fields" hidden><label>目标 QPS <span class="hint">0 = 尽快全部发起</span><input name="request_rate" type="number" min="0" max="1000" step="any" value="5"></label><label>最大并发数 <span class="hint">留空 = 请求总数</span><input name="concurrency" type="number" min="1" max="5000" placeholder="可选，例如 16"></label></div>

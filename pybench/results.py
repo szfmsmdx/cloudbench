@@ -34,7 +34,7 @@ def summarize(run: dict[str, Any], samples: list[dict[str, Any]]) -> dict[str, A
     end = datetime.fromisoformat((run["finished_at"] or utc_now()).replace("Z", "+00:00"))
     duration = max((end - start).total_seconds(), .001)
     output = sum(s["completion_tokens"] or 0 for s in ok)
-    sent = sorted(s["sent_offset_ms"] for s in samples if s["sent_offset_ms"] is not None)
+    sent = sorted(s["sent_offset_ms"] for s in samples if s["sent_offset_ms"] is not None and s.get("turn_index") in (None, 1))
     priced = [s for s in ok if s["estimated_cost"] is not None]
     hourly = run["gpu_count"] * run["gpu_hour_price"] if run["gpu_count"] and run["gpu_hour_price"] is not None else None
     hardware_cost = hourly * duration / 3600 if hourly is not None else None
@@ -58,8 +58,8 @@ def summarize(run: dict[str, Any], samples: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-RUN_COLUMNS = "schema_version run_id target_name model dataset_id dataset_name mode request_rate_qps arrival_pattern seed input_words max_input_tokens status started_at finished_at request_count concurrency completed success failed success_rate_pct ttft_p50_ms ttft_p95_ms ttft_p99_ms tpot_p50_ms tpot_p95_ms tpot_p99_ms e2e_p50_ms e2e_p95_ms e2e_p99_ms output_tps request_tps actual_arrival_qps queue_delay_p50_ms cache_hit_rate_pct cache_coverage estimated_cost currency price_source price_checked_at gpu_count gpu_hour_price gpu_currency hardware_hourly_cost hardware_run_cost hardware_per_1m_output".split()
-SAMPLE_COLUMNS = "schema_version run_id seq dataset_item_index scheduled_offset_ms sent_offset_ms queue_delay_ms status http_status started_at ttft_ms tpot_ms e2e_ms prompt_tokens completion_tokens cached_tokens uncached_tokens cache_write_tokens usage_source estimated_cost error".split()
+RUN_COLUMNS = "schema_version run_id target_name model dataset_id dataset_name mode request_rate_qps arrival_pattern seed input_words max_input_tokens min_input_tokens unit_count request_timeout turn_delay_ms dataset_snapshot status started_at finished_at request_count concurrency completed success failed success_rate_pct ttft_p50_ms ttft_p95_ms ttft_p99_ms tpot_p50_ms tpot_p95_ms tpot_p99_ms e2e_p50_ms e2e_p95_ms e2e_p99_ms output_tps request_tps actual_arrival_qps queue_delay_p50_ms cache_hit_rate_pct cache_coverage estimated_cost currency price_source price_checked_at gpu_count gpu_hour_price gpu_currency hardware_hourly_cost hardware_run_cost hardware_per_1m_output".split()
+SAMPLE_COLUMNS = "schema_version run_id seq dataset_item_index source_item_id session_id turn_index finish_reason scheduled_offset_ms sent_offset_ms queue_delay_ms status http_status started_at ttft_ms tpot_ms e2e_ms prompt_tokens completion_tokens cached_tokens uncached_tokens cache_write_tokens usage_source estimated_cost error".split()
 TIMELINE_COLUMNS = "run_id seq recorded_at elapsed_ms window_ms rate_window_ms sent_qps completed_qps success_qps failed_qps reported_output_tps stream_events_per_s sent completed success failed inflight reported_output_tokens usage_known usage_missing ttft_p50_ms ttft_p95_ms e2e_p95_ms final".split()
 
 

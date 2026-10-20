@@ -85,12 +85,14 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('name="seed"', page)
         self.assertNotIn("dataset-import", page)
         state = await (await self.client.get("/api/state")).json()
-        if len(state["datasets"]) != 2:
+        local = [d for d in state["datasets"] if d["kind"].startswith("local-")]
+        if len(local) != 2:
             self.skipTest("完整端到端测试需要下载本地 LongBench 和 LongBench v2")
-        self.assertEqual([d["id"] for d in state["datasets"]], ["local:longbench", "local:longbench-v2"])
-        for dataset in state["datasets"]:
+        self.assertEqual([d["id"] for d in local], ["local:longbench", "local:longbench-v2"])
+        self.assertEqual(len([d for d in state["datasets"] if d["kind"].startswith("public:")]), 5)
+        for dataset in local:
             self.assertEqual(sum(row["count"] for row in dataset["distribution"]), dataset["item_count"])
-        one_to_two_k = next(row for row in state["datasets"][0]["distribution"] if row["range"] == "1K–2K")
+        one_to_two_k = next(row for row in local[0]["distribution"] if row["range"] == "1K–2K")
         self.assertEqual(one_to_two_k, {"range": "1K–2K", "count": 360, "percentage": 7.58})
         self.assertTrue(state["targets"][0]["has_key"])
         self.assertNotIn("test-secret", json.dumps(state))
@@ -171,7 +173,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(state["targets"][0]["has_key"])
 
     async def test_blank_count_defaults_to_all_eligible_samples(self):
-        datasets = (await (await self.client.get("/api/state")).json())["datasets"]
+        datasets = [d for d in (await (await self.client.get("/api/state")).json())["datasets"] if d["kind"].startswith("local-")]
         if len(datasets) != 2:
             self.skipTest("全量条数测试需要本地离线索引")
         for dataset, index_file, blank in ((datasets[0], "longbench-token-counts.json", {}),

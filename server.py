@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from pybench.datasets import eligible_count, length_distribution, token_counts
+from pybench.workloads import catalog, load_workloads, select_workloads
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
 
 ROOT = Path(__file__).resolve().parent
@@ -162,8 +163,11 @@ class CloudBench:
         self.db.executescript(SCHEMA)
         migrations = {
             "runs": {"dataset_id": "TEXT", "dataset_name": "TEXT", "mode": "TEXT", "request_rate": "REAL",
-                     "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER"},
-            "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL"},
+                     "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER",
+                     "unit_count": "INTEGER", "min_input_tokens": "INTEGER", "request_timeout": "REAL",
+                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT"},
+            "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL",
+                        "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT"},
         }
         for table, columns in migrations.items():
             present = {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
@@ -208,9 +212,10 @@ class CloudBench:
         ]
         directory = self.root / "datasets"
         return [{"id": key, "name": name, "kind": kind, "item_count": count, "source": source, "description": description,
-                 "distribution": length_distribution(token_counts(kind, self.root))}
+                 "distribution": length_distribution(token_counts(kind, self.root)), "ready": True,
+                 "category": "long-context", "unit": "样本", "length_label": "Kimi K3 token（不含聊天模板）"}
                 for key, name, kind, count, source, description, raw, index in specifications
-                if (directory / raw).is_file() and (directory / index).is_file()]
+                if (directory / raw).is_file() and (directory / index).is_file()] + catalog(self.root)
 
     async def index(self, request: web.Request) -> web.FileResponse:
         return web.FileResponse(self.root / "public" / "index.html")
@@ -276,6 +281,8 @@ class CloudBench:
         dataset = next((d for d in self.datasets() if d["id"] == body.get("dataset_id")), None)
         if dataset is None:
             raise ApiError("请选择有效数据集")
+        if not dataset.get("ready", True):
+            raise ApiError("数据集尚未准备，见 README 中的数据准备命令")
         mode = body.get("mode")
         if mode not in {"sync", "async"}:
             raise ApiError("请选择同步或异步模式")
@@ -284,20 +291,35 @@ class CloudBench:
             raise ApiError("当前仅支持固定间隔或 QPS=0 突发模式")
         context_limit = number(body.get("max_input_tokens") or 131072, "模型上下文上限", 2048, 4194304, True)
         output_limit = number(body.get("max_tokens"), "最大输出 token", 1, 8192, True)
+        minimum = number(body.get("min_input_tokens") or 0, "最短输入 token", 0, context_limit - 1, True)
+        seed = 42 if body.get("seed") in (None, "") else number(body["seed"], "随机种子", 0, 4294967295, True)
+        timeout = number(120 if body.get("request_timeout") in (None, "") else body["request_timeout"], "单请求超时", 1, 7200)
+        turn_delay = number(body.get("turn_delay_ms") or 0, "轮间等待", 0, 60000)
         requested_count = body.get("request_count")
-        count = eligible_count(dataset["kind"], self.root, context_limit, output_limit) if requested_count is None or requested_count == "" else number(requested_count, "测试条数", 1, 5000, True)
+        units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 5000, True)
+        if dataset["kind"].startswith("public:"):
+            selected = select_workloads(load_workloads(self.root, dataset["kind"], context_limit, output_limit, minimum), units, seed)
+            units = len(selected)
+            count = sum(len(item["turns"]) for item in selected)
+            if count > 100000:
+                raise ApiError("单次最多100000个逐轮请求，请减少会话数或轮数")
+        else:
+            available = eligible_count(dataset["kind"], self.root, context_limit, output_limit, minimum)
+            units = available if units is None else units
+            count = units
         concurrency = body.get("concurrency")
-        seed = body.get("seed")
         run = {
             "id": str(uuid.uuid4()), "target_id": target["id"], "target_name": target["name"],
             "model": target["model"], "base_url": target["base_url"],
             "price_snapshot": json.dumps(price, ensure_ascii=False) if price else None,
             "prompt": dataset["name"], "max_tokens": output_limit,
-            "request_count": count, "concurrency": 1 if mode == "sync" else number(count if concurrency is None or concurrency == "" else concurrency, "并发数", 1, 5000, True),
+            "request_count": count, "concurrency": 1 if mode == "sync" else number(units if concurrency is None or concurrency == "" else concurrency, "并发数", 1, 5000, True),
+            "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
+            "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,
             "dataset_id": dataset["id"], "dataset_name": dataset["name"], "mode": mode,
             "request_rate": qps, "arrival_pattern": ("burst" if qps == 0 else "fixed") if mode == "async" else None,
-            "seed": 42 if seed is None or seed == "" else number(seed, "随机种子", 0, 4294967295, True),
+            "seed": seed,
             "input_words": None,
             "max_input_tokens": context_limit,
             "gpu_count": number(body["gpu_count"], "GPU 数量", 1, 128, True) if body.get("gpu_count") else None,
@@ -324,7 +346,7 @@ class CloudBench:
         stderr_task = None
         try:
             process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pybench.runner", cwd=self.root,
+                sys.executable, "-m", "pybench.runner", cwd=ROOT,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "PYTHONUTF8": "1"},
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -341,8 +363,8 @@ class CloudBench:
                 process.terminate()
             else:
                 config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None},
-                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens")},
-                          "dataset": {"kind": dataset["kind"]}, "price": price}
+                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms")},
+                          "dataset": {"kind": dataset["kind"], "sha256": dataset.get("sha256"), "root": str(self.root)}, "price": price}
                 config["run"]["include_usage"] = bool(run["include_usage"])
                 process.stdin.write(json.dumps(config, ensure_ascii=False).encode("utf-8"))
                 await process.stdin.drain()
@@ -432,9 +454,9 @@ class CloudBench:
         self.db.close()
 
 
-def create_app(data_dir: Path | None = None) -> web.Application:
+def create_app(data_dir: Path | None = None, root: Path = ROOT) -> web.Application:
     directory = data_dir or Path(os.environ.get("CLOUDBENCH_DATA_DIR", ROOT / "data")).resolve()
-    return CloudBench(directory).app
+    return CloudBench(directory, root).app
 
 
 if __name__ == "__main__":

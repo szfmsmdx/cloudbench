@@ -37,15 +37,15 @@ def prompt_budget(context_limit: int, output_limit: int) -> int:
     return limit
 
 
-def eligible_count(kind: str, root: Path, context_limit: int, output_limit: int) -> int:
+def eligible_count(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0) -> int:
     limit = prompt_budget(context_limit, output_limit)
-    count = sum(length <= limit for length in token_counts(kind, root))
+    count = sum(minimum <= length <= limit for length in token_counts(kind, root))
     if count == 0:
         raise ValueError("当前上下文上限下没有可用样本")
     return count
 
 
-def load_local_items(kind: str, root: Path, context_limit: int, output_limit: int) -> list[dict[str, Any]]:
+def load_local_items(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0) -> list[dict[str, Any]]:
     # The tokenizer counts omit the chat template. Keep a small reserve for it.
     prompt_limit = prompt_budget(context_limit, output_limit)
 
@@ -68,7 +68,7 @@ def load_local_items(kind: str, root: Path, context_limit: int, output_limit: in
                     if index >= len(counts):
                         raise ValueError("LongBench token 索引与原始文件不匹配")
                     text = f"{row.get('context') or ''}\n{row.get('input') or ''}".strip()
-                    if text and counts[index] <= prompt_limit:
+                    if text and minimum <= counts[index] <= prompt_limit:
                         items.append({"index": index, "messages": [{"role": "user", "content": text}]})
                     index += 1
         if index != len(counts):
@@ -85,7 +85,7 @@ def load_local_items(kind: str, root: Path, context_limit: int, output_limit: in
                 row_count += 1
                 if index >= len(counts):
                     raise ValueError("LongBench v2 token 索引与原始文件不匹配")
-                if counts[index] > prompt_limit:
+                if not minimum <= counts[index] <= prompt_limit:
                     continue
                 choices = "\n".join(f"{letter}. {row.get(f'choice_{letter}', '')}" for letter in "ABCD")
                 text = f"{row.get('context') or ''}\n\n{row.get('question') or ''}\n{choices}\n请从 A、B、C、D 中选择正确答案。"

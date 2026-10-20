@@ -2,6 +2,7 @@ data/
 .venv/
 datasets/raw/
 datasets/tokenizers/
+datasets/prepared/
 __pycache__/
 *.py[cod]
 .env
