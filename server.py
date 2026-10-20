@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from pybench.datasets import eligible_count, length_distribution, token_counts
-from pybench.workloads import catalog, load_workloads, select_workloads
+from pybench.workloads import catalog, load_workloads, select_workloads, turn_count
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
 
 ROOT = Path(__file__).resolve().parent
@@ -296,24 +296,25 @@ class CloudBench:
         timeout = number(120 if body.get("request_timeout") in (None, "") else body["request_timeout"], "单请求超时", 1, 7200)
         turn_delay = number(body.get("turn_delay_ms") or 0, "轮间等待", 0, 60000)
         requested_count = body.get("request_count")
-        units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 5000, True)
+        units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 1000000000, True)
         if dataset["kind"].startswith("public:"):
             selected = select_workloads(load_workloads(self.root, dataset["kind"], context_limit, output_limit, minimum), units, seed)
             units = len(selected)
-            count = sum(len(item["turns"]) for item in selected)
-            if count > 100000:
-                raise ApiError("单次最多100000个逐轮请求，请减少会话数或轮数")
+            count = sum(turn_count(item) for item in selected)
         else:
             available = eligible_count(dataset["kind"], self.root, context_limit, output_limit, minimum)
+            if units is not None and units > available:
+                raise ApiError(f"所选长度范围只有 {available} 条可用样本，不能通过重复样本补足 {units} 条")
             units = available if units is None else units
             count = units
         concurrency = body.get("concurrency")
+        default_concurrency = min(units, 16) if dataset["kind"].startswith("public:") else min(units, 5000)
         run = {
             "id": str(uuid.uuid4()), "target_id": target["id"], "target_name": target["name"],
             "model": target["model"], "base_url": target["base_url"],
             "price_snapshot": json.dumps(price, ensure_ascii=False) if price else None,
             "prompt": dataset["name"], "max_tokens": output_limit,
-            "request_count": count, "concurrency": 1 if mode == "sync" else number(units if concurrency is None or concurrency == "" else concurrency, "并发数", 1, 5000, True),
+            "request_count": count, "concurrency": 1 if mode == "sync" else number(default_concurrency if concurrency is None or concurrency == "" else concurrency, "并发数", 1, 5000, True),
             "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
             "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,

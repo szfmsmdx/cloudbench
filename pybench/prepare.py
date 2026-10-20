@@ -1,6 +1,6 @@
-"""Download bounded public samples and prepare reproducible performance workloads.
+"""Prepare complete source partitions; sampling requires an explicit --limit.
 
-python -m pybench.prepare all --limit 100 --max-turns 16
+python -m pybench.prepare all
 No dataset-provided code or recorded tool command is executed.
 """
 
@@ -19,7 +19,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterator
 
-from pybench.workloads import CATALOG, write_snapshot
+from pybench.workloads import CATALOG, IndexedWriter
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -68,6 +68,21 @@ class Counter:
         text = json.dumps({k: turn[k] for k in ("messages", "tools") if k in turn}, ensure_ascii=False)
         return len(self.encoding.encode_ordinary(text))
 
+    def count_item(self, item):
+        turns = item["turns"]
+        # Agent prefixes share history. Tokenize each message once rather than
+        # repeatedly encoding every earlier message in a long conversation.
+        if len(turns) == 1:
+            turns[0]["input_tokens"] = self(turns[0])
+            return
+        history = turns[-1]["messages"]
+        prefix = [0]
+        for message in history:
+            prefix.append(prefix[-1] + len(self.encoding.encode_ordinary(json.dumps(message, ensure_ascii=False))) + 1)
+        frame = self({"messages": [], **({"tools": turns[0]["tools"]} if turns[0].get("tools") else {})})
+        for turn in turns:
+            turn["input_tokens"] = frame + prefix[len(turn["messages"])]
+
 
 def text_content(value: Any) -> str:
     if isinstance(value, str):
@@ -79,7 +94,7 @@ def text_content(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def agent_item(row: dict[str, Any], index: int, max_turns: int) -> dict[str, Any]:
+def agent_item(row: dict[str, Any], index: int, max_turns: int | None = None) -> dict[str, Any]:
     messages = row.get("messages", [])
     if isinstance(messages, str):
         messages = json.loads(messages)
@@ -103,7 +118,7 @@ def agent_item(row: dict[str, Any], index: int, max_turns: int) -> dict[str, Any
                 raise ValueError("原始工具返回不完整")
             if history and history[-1]["role"] in {"user", "tool"}:
                 turns.append({"messages": list(history), **({"tools": list(tools)} if tools else {})})
-                if len(turns) >= max_turns:
+                if max_turns is not None and len(turns) >= max_turns:
                     break
             calls = []
             for call in original.get("tool_calls") or []:
@@ -286,33 +301,71 @@ def remote_rows(key: str, limit: int, offset: int) -> Iterator[dict[str, Any]]:
             index += 1
 
 
-def prepare(root: Path, key: str, limit: int = 100, max_turns: int = 16, tokenizer: str = "kimi-k3", source: Path | None = None, offset: int = 0) -> dict[str, Any]:
-    if key not in CATALOG or not 1 <= limit <= 5000 or not 1 <= max_turns <= 128 or offset < 0:
+def prepare(root: Path, key: str, limit: int | None = None, max_turns: int | None = None, tokenizer: str = "kimi-k3", source: Path | None = None, offset: int = 0, manifest_path: Path | None = None, endpoint: str | None = None) -> dict[str, Any]:
+    if key not in CATALOG or (limit is not None and limit < 1) or (max_turns is not None and max_turns < 1) or offset < 0:
         raise ValueError("无效的数据准备参数")
+    progress_file = root / "datasets" / "prepared" / f"{key}.progress.json"
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
+    progress_info = {}
+    def progress(**values):
+        progress_info.update(values, updated_at=datetime.now(timezone.utc).isoformat())
+        temp = progress_file.with_suffix(".tmp")
+        temp.write_text(json.dumps(progress_info, ensure_ascii=False), encoding="utf-8")
+        temp.replace(progress_file)
+
     counter = Counter(root, tokenizer)
+    manifest = None
     if source:
         from itertools import islice
-        rows = islice(local_rows(source), offset, offset + limit)
+        rows = islice(local_rows(source), offset, None if limit is None else offset + limit)
+    elif limit is None:
+        from pybench.sources import source_manifest, download_source, source_rows
+        cached = root / "datasets" / "raw" / key / "source-manifest.json"
+        manifest = json.loads((manifest_path or cached).read_text(encoding="utf-8")) if (manifest_path or cached).is_file() else source_manifest(key)
+        if manifest["key"] != key:
+            raise ValueError("来源清单与数据集不匹配")
+        progress(scope=manifest["scope"], expected_rows=manifest.get("expected_rows"), status="downloading")
+        manifest = download_source(root, key, manifest, endpoint, progress)
+        rows = source_rows(root, key, manifest)
     else:
         rows = remote_rows(key, limit, offset)
-    items, skipped = [], []
-    for index, row in enumerate(rows):
-        if index >= limit:
-            break
-        try:
-            item = agent_item(row, index + offset, max_turns) if CATALOG[key]["category"] == "agent" else rag_item(key, row, index + offset)
-            for turn in item["turns"]:
-                turn["input_tokens"] = counter(turn)
-            items.append(item)
-        except (ValueError, KeyError, TypeError) as exc:
-            skipped.append({"row": index + offset, "reason": str(exc)[:160]})
-    if not items:
-        raise ValueError(f"没有转换成功的样本；前3条错误：{skipped[:3]}")
-    return write_snapshot(root, key, items, {"source": CATALOG[key]["source"], "source_file": source.name if source else None,
-        "prepared_at": datetime.now(timezone.utc).isoformat(), "sampling": "task-interleaved bounded slice" if key == "crud-rag" and not source else "source order bounded slice",
-        "offset": offset, "requested_rows": limit, "max_turns": max_turns,
-        "tokenizer": tokenizer, "tokenizer_sha256": counter.fingerprint, "length_label": counter.label,
-        "skipped_count": len(skipped), "skipped": skipped, "reference_answers_sent": False})
+    writer = IndexedWriter(root, key)
+    skipped, errors = 0, []
+    progress(status="indexing", rows=0, accepted=0)
+    try:
+        for index, row in enumerate(rows):
+            if limit is not None and index >= limit:
+                break
+            try:
+                item = agent_item(row, index + offset, max_turns) if CATALOG[key]["category"] == "agent" else rag_item(key, row, index + offset)
+                counter.count_item(item)
+                writer.append(row, item)
+            except (ValueError, KeyError, TypeError) as exc:
+                skipped += 1
+                writer.append(row, error=str(exc)[:300])
+                if len(errors) < 20:
+                    errors.append({"row": index + offset, "reason": str(exc)[:160]})
+            if writer.rows % 100 == 0:
+                progress(status="indexing", rows=writer.rows, accepted=writer.accepted)
+                print(f"{key}: indexed {writer.rows} raw records, {writer.accepted} usable", flush=True)
+        if not writer.accepted:
+            raise ValueError(f"没有转换成功的样本；前3条错误：{errors[:3]}")
+        if manifest and manifest.get("expected_rows") is not None and writer.rows != manifest["expected_rows"]:
+            raise ValueError(f"来源记录数不完整：{writer.rows}/{manifest['expected_rows']}；原快照未替换")
+        info = writer.finish({"source": CATALOG[key]["source"], "source_file": source.name if source else None,
+            "scope": manifest["scope"] if manifest else (str(source.name) if source else "显式抽样"),
+            "source_manifest": manifest, "source_total": manifest.get("expected_rows", writer.rows) if manifest else writer.rows,
+            "complete": limit is None and max_turns is None and offset == 0,
+            "prepared_at": datetime.now(timezone.utc).isoformat(), "sampling": "complete source partition" if limit is None else "explicit bounded slice",
+            "offset": offset, "requested_rows": limit, "max_turns": max_turns,
+            "tokenizer": tokenizer, "tokenizer_sha256": counter.fingerprint, "length_label": counter.label + "；多轮按消息累加参考",
+            "skipped_count": skipped, "skipped": errors, "raw_records_preserved": True, "reference_answers_sent": False})
+        progress(status="complete", rows=info["raw_count"], accepted=info["item_count"])
+        return info
+    except BaseException as exc:
+        writer.close()
+        progress(status="error", rows=writer.rows, accepted=writer.accepted, error=str(exc)[:300])
+        raise
 
 
 def main():
@@ -321,18 +374,20 @@ def main():
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", choices=[*CATALOG, "all"])
-    parser.add_argument("--limit", type=int, default=100)
-    parser.add_argument("--max-turns", type=int, default=16)
+    parser.add_argument("--limit", type=int, help="仅在显式指定时抽样；默认导入完整来源")
+    parser.add_argument("--max-turns", type=int, help="仅在显式指定时限制会话轮数；默认保留全部轮次")
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--tokenizer", default="kimi-k3", help="kimi-k3 或 tiktoken encoding 名称")
     parser.add_argument("--input", type=Path, help="本地原始 JSON/JSONL/JSONL.bz2")
+    parser.add_argument("--manifest", type=Path, help="官方完整文件清单，可在可访问 HF 的机器生成")
+    parser.add_argument("--endpoint", help="HF 文件下载镜像，例如 https://hf-mirror.com")
     args = parser.parse_args()
-    if args.input and args.dataset == "all":
-        parser.error("--input 需要指定单个数据集")
+    if (args.input or args.manifest) and args.dataset == "all":
+        parser.error("--input / --manifest 需要指定单个数据集")
     failed = False
     for key in CATALOG if args.dataset == "all" else [args.dataset]:
         try:
-            info = prepare(ROOT, key, args.limit, args.max_turns, args.tokenizer, args.input, args.offset)
+            info = prepare(ROOT, key, args.limit, args.max_turns, args.tokenizer, args.input, args.offset, args.manifest, args.endpoint)
             print(f"{key}: {info['item_count']} samples/sessions, {info['request_total']} requests, skipped={info['skipped_count']}", flush=True)
         except Exception as exc:
             failed = True

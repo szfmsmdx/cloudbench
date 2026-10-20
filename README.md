@@ -28,9 +28,9 @@ python server.py
 | 异步，QPS > 0 | 按固定间隔计划发送。QPS=5 时每 200 ms 计划发送一条。 |
 | 异步，QPS = 0 | 不设发送间隔，尽快全部发起。填写最大并发数时，完成一条补发一条。 |
 
-最大并发数留空时使用请求总数。填写上限会限制实际发送速率。CSV 中保留计划时间、实际发起时间和排队延迟，便于检查是否达到目标 QPS。QPS=0 没有目标到达速率，主要看完成吞吐。
+公开数据集最大并发留空时默认最多16；LongBench 留空时使用请求数（最多5000）。填写上限会限制实际发送速率。CSV 保留计划时间、实际发起时间和排队延迟，便于检查是否达到目标 QPS。QPS=0 没有目标到达速率，主要看完成吞吐。
 
-测试条数留空时，使用当前上下文上限内的全部合格样本，每条一次；填写条数时按指定请求数测试。
+测试条数留空时，使用当前长度范围内的全部合格样本，每条一次；填写条数时从完整池中抽取指定数量，超过可用量会报错，不循环补足。
 
 ## 数据集
 
@@ -52,18 +52,24 @@ python server.py
 在租 GPU 前执行，只访问公开数据源，不调用模型或执行轨迹中的工具命令：
 
 ```powershell
-python -m pybench.prepare all --limit 100 --max-turns 16
-# 只准备一套；更多行使用 --limit，其他区段使用 --offset
-python -m pybench.prepare open-swe --limit 100 --max-turns 16 --offset 100
+python -m pybench.prepare all
+# 只导入一套完整来源；默认不限制样本数或会话轮数
+python -m pybench.prepare open-swe
+# Hugging Face 无法连接时，使用镜像下载文件
+python -m pybench.prepare open-swe --endpoint https://hf-mirror.com
 # 已下载的原始 JSON、JSONL 或 JSONL.bz2
-python -m pybench.prepare crag --input path/to/crag.jsonl.bz2 --limit 100
+python -m pybench.prepare crag --input path/to/crag.jsonl.bz2
+# 只有主动指定 --limit / --max-turns 才会生成抽样池或限制轮次
+python -m pybench.prepare hotpotqa --limit 100
 ```
 
-默认使用 Kimi K3 分词器，仅下载必要的分词文件，不加载模型或运行下载的 Python。可用 `--tokenizer cl100k_base` 改用另一参考编码。长度包含正文、历史和工具定义的JSON表示，未应用目标模型聊天模板；这是筛选参考，不代表 DeepSeek 等模型的实际 token 数。实际用量仍取接口 usage。
+默认使用 Kimi K3 分词器，仅下载必要的分词文件，不加载模型或运行下载的 Python。可用 `--tokenizer cl100k_base` 改用另一参考编码。长度包含正文、历史和工具定义的JSON表示；多轮历史按消息累加参考长度，未应用目标模型聊天模板。筛选口径与目标模型可能不同，实际用量取接口 usage。
 
-`datasets/prepared/` 保存本机 JSONL 与元数据，包含来源、准备时间、抽样区段、轮数、跳过原因、分词口径和 SHA-256。它们不上传 GitHub。默认只抽取来源顺序的一小段；CRUD 按任务交错取样。不是全量下载或生产流量分布；下载中断可重跑，也可用本地完整原始文件转换。HF Viewer 返回截断字段时会拒绝转换，避免把截断轨迹当成完整数据。
+`datasets/raw/` 保留完整来源文件和清单；`datasets/prepared/` 保存 SQLite 索引、压缩后的完整原始记录和元数据。转换失败的原始记录同样保留，并记录错误。网页区分来源总量、可回放量、来源分区及导入状态；只有完整导入通过计数校验后才替换旧池。大文件不上传 GitHub。
 
-Open-SWE 使用 `v1.2/minisweagent`，SWE-smith 使用 `default/tool`；HotpotQA 使用 `distractor/validation`；CRAG 使用 Task 1/2 dev v4，流式解压所需部分；CRUD 使用官方 `crud_split/split_merged.json`（原始文件约27 MB，本地缓存）。来源与许可按上游发布，引用信息保留在元数据中。
+完整导入针对下列明确分区，不把其他版本或分区混入同一个池：Open-SWE `v1.2/minisweagent`，SWE-smith `default/tool`，HotpotQA `distractor/validation`，CRAG Task 1/2 dev v4，CRUD 官方 `crud_split/split_merged.json` 六类任务。HF 来源使用完整 Parquet 文件清单，记录文件 SHA-256 并校验总行数。各池实际数量与上游版本见网页及元数据，不固定为100。
+
+若服务器无法访问 HF 元数据接口，可在可访问的机器用 `pybench.sources.source_manifest(key)` 保存官方清单，传到服务器后加 `--manifest manifest.json --endpoint https://hf-mirror.com`。文件下载可断点重试；已完成文件会保留。元数据记录来源和许可链接。
 
 ### Agent 与 RAG 的统计范围
 
@@ -72,7 +78,7 @@ Open-SWE 使用 `v1.2/minisweagent`，SWE-smith 使用 `default/tool`；HotpotQA
 - CRUD 按官方六类任务转换：摘要、续写、纠错及单/双/三文档问答。续写仅提供原始开头；问答保留关联新闻，排除答案与标注推理。
 - RAG 只测“给定材料后的生成”，参考答案单独保存，不发给模型；不包含检索、重排或向量库耗时，也未实现答案准确率评分。
 - 最短输入可筛选长度档；Agent按可回放末轮长度筛选，保留较短的前置轮以建立缓存。超长后续轮停止回放，不裁剪历史。
-- 显式条数大于样本池时会重复使用样本，可能提高缓存命中；冷前缀测试应使用不同区段和不重叠的样本。热前缀命中率以服务端数据为准。
+- 单次测试不重复抽样，超出当前长度范围可用量时会报错。多场测试仍可能选中相同前缀；热前缀命中率以服务端数据为准。
 
 本地原始文件保存在 `datasets/raw/`。长度索引用 Kimi K3 分词器预先计算，未包括聊天模板；筛选时为模板预留 512 token，并扣除输出上限。实际 token 用量以模型服务返回的 `usage` 为准。长度分布见 [统计表](datasets/length-distribution.md)。
 

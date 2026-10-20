@@ -4,13 +4,15 @@ import asyncio
 import json
 import tempfile
 import unittest
+from contextlib import closing
+from unittest.mock import patch
 from pathlib import Path
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from pybench.prepare import agent_item, rag_item
-from pybench.workloads import catalog, load_workloads, paths, write_snapshot
+from pybench.prepare import agent_item, prepare, rag_item
+from pybench.workloads import IndexedWriter, catalog, hydrate_workload, load_workloads, paths, select_workloads, write_snapshot
 from server import create_app
 
 
@@ -26,6 +28,63 @@ def trajectory():
 
 
 class AdapterTests(unittest.TestCase):
+    def test_default_preparation_imports_more_than_100_and_preserves_raw_records(self):
+        class Counter:
+            fingerprint, label = "fixture", "fixture tokens"
+            def __init__(self, *args):
+                pass
+            def count_item(self, item):
+                for turn in item["turns"]:
+                    turn["input_tokens"] = 100
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.jsonl"
+            source.write_text("".join(json.dumps({"_id": str(i), "question": f"q{i}", "answer": f"gold{i}",
+                "context": [["article", [f"evidence{i}"]]], "extra_original_field": i}) + "\n" for i in range(137)), encoding="utf-8")
+            with patch("pybench.prepare.Counter", Counter):
+                info = prepare(root, "hotpotqa", source=source)
+            self.assertEqual((info["raw_count"], info["item_count"]), (137, 137))
+            self.assertTrue(info["complete"])
+            self.assertIsNone(info["max_turns"])
+            units = load_workloads(root, "public:hotpotqa", 4096, 128)
+            self.assertEqual(len(units), 137)
+            self.assertNotIn("turns", units[136])
+            self.assertEqual(units[136]["turn_count"], 1)
+            item = hydrate_workload(root, "public:hotpotqa", units[136])
+            self.assertIn("evidence136", json.dumps(item["turns"]))
+            self.assertNotIn("gold136", json.dumps(item["turns"]))
+            import sqlite3, zlib
+            data, _ = paths(root, "hotpotqa")
+            with closing(sqlite3.connect(data)) as db:
+                raw = json.loads(zlib.decompress(db.execute("SELECT raw_record FROM workloads WHERE idx=136").fetchone()[0]))
+            self.assertEqual(raw["extra_original_field"], 136)
+            self.assertEqual(raw["answer"], "gold136")
+
+    def test_agent_default_keeps_more_than_16_turns(self):
+        messages = []
+        for i in range(23):
+            messages.extend([{"role": "user", "content": str(i)}, {"role": "assistant", "content": "answer"}])
+        item = agent_item({"messages": messages}, 0)
+        self.assertEqual(len(item["turns"]), 23)
+
+    def test_excess_request_count_is_rejected_instead_of_repeating_samples(self):
+        with self.assertRaisesRegex(ValueError, "不能通过重复"):
+            select_workloads([{"id": "only-one"}], 2, 42)
+
+    def test_unusable_record_is_retained_in_indexed_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            writer = IndexedWriter(root, "open-swe")
+            writer.append({"messages": [], "original": "keep-me"}, error="no turns")
+            item = agent_item(trajectory(), 1)
+            for turn in item["turns"]:
+                turn["input_tokens"] = 100
+            writer.append(trajectory(), item)
+            info = writer.finish({"complete": True})
+            self.assertEqual((info["raw_count"], info["item_count"]), (2, 1))
+            units = load_workloads(root, "public:open-swe", 4096, 128)
+            self.assertEqual([unit["index"] for unit in units], [1])
+
     def test_agent_preserves_reference_prefix_and_matches_missing_ids(self):
         item = agent_item(trajectory(), 0, 16)
         self.assertEqual(len(item["turns"]), 2)
@@ -129,7 +188,13 @@ class PublicWorkloadAPITests(unittest.IsolatedAsyncioTestCase):
         item["reference_answer"] = "never-send-reference"
         for turn in item["turns"]:
             turn["input_tokens"] = 100
-        write_snapshot(self.root, "open-swe", [item], {"tokenizer": "test", "length_label": "test"})
+        writer = IndexedWriter(self.root, "open-swe")
+        writer.append(trajectory(), item)
+        raw2 = trajectory()
+        raw2["trajectory_id"] = "trace-2"
+        item2 = {**item, "id": "trace-2"}
+        writer.append(raw2, item2)
+        writer.finish({"tokenizer": "test", "length_label": "test", "complete": True})
 
         async def respond(request):
             payload = await request.json()
@@ -191,6 +256,9 @@ class PublicWorkloadAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         response = await self.client.post("/api/runs", json={**config, "dataset_id": "public:open-swe", "min_input_tokens": 1000})
         self.assertEqual(response.status, 400)
+        response = await self.client.post("/api/runs", json={**config, "dataset_id": "public:open-swe", "request_count": 3})
+        self.assertEqual(response.status, 400)
+        self.assertIn("不能通过重复", (await response.json())["error"])
         self.assertEqual(self.payloads, [])
 
 

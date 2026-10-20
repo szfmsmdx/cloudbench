@@ -35,12 +35,14 @@ function renderDatasetInfo() {
   $('#local-options').hidden = !dataset;
   const distribution = (dataset?.distribution || []).filter(row => row.count > 0);
   const largest = Math.max(1, ...distribution.map(row => row.count));
+  const scope = dataset?.kind?.startsWith('public:')
+    ? `${dataset.complete ? '完整来源' : '未完整导入'}：${dataset.scope || dataset.preparation?.scope || '旧版抽样池'}；原始 ${fmt(dataset.source_total ?? dataset.raw_count, 0)} 条，可回放 ${fmt(dataset.item_count, 0)} ${dataset.unit || '样本'}。${dataset.skipped_count ? `另有 ${fmt(dataset.skipped_count, 0)} 条未适配，原始记录仍保留。` : ''}` : '';
   $('#dataset-info').innerHTML = dataset
     ? `<div class="dataset-summary"><div class="dataset-summary-name"><strong>${escapeHtml(dataset.name)}</strong><span>${fmt(dataset.item_count, 0)} ${escapeHtml(dataset.unit || '样本')}${dataset.category === 'agent' ? ` · ${fmt(dataset.request_total, 0)} 个逐轮请求` : ''}</span></div>
        <div class="dataset-hover"><button type="button" class="dataset-info-trigger" aria-describedby="dataset-distribution-popup">Token 分布 <span aria-hidden="true">ⓘ</span></button>
        <div id="dataset-distribution-popup" class="dataset-popover" role="tooltip"><div class="dataset-popover-title"><strong>输入长度分布</strong><span>${fmt(dataset.request_total || dataset.item_count, 0)} 个请求</span></div>
        <div class="dataset-histogram">${distribution.map(row => `<div class="dataset-histogram-row"><span>${escapeHtml(row.range)}</span><span class="dataset-histogram-track" aria-hidden="true"><i style="width:${row.count / largest * 100}%"></i></span><span class="dataset-histogram-value">${fmt(row.count, 0)} · ${fmt(row.percentage, 2)}%</span></div>`).join('')}</div>
-       <small>${escapeHtml(dataset.length_label || 'Kimi K3 token')} · 1K = 1024</small></div></div></div><p>${escapeHtml(dataset.description || '')}${dataset.category === 'agent' ? ' 条数、QPS和并发按会话计算；逐轮发送原始历史，不执行工具。' : ''}</p>`
+       <small>${escapeHtml(dataset.length_label || 'Kimi K3 token')} · 1K = 1024</small></div></div></div><p>${escapeHtml(scope)}</p><p>${escapeHtml(dataset.description || '')}${dataset.category === 'agent' ? ' 条数、QPS和并发按会话计算；逐轮发送原始历史，不执行工具。' : ''}</p>`
     : '选择已准备的数据集后显示长度分布。公开数据准备方式见 README。';
   renderMode();
 }
@@ -66,7 +68,7 @@ function renderState() {
   $('#price-count').textContent = state.prices.length;
   setSelectOptions($('#run-target'), state.targets, state.targets.length ? '请选择端点' : '请先添加端点', t => `${t.name} · ${t.model}`);
   setSelectOptions($('#run-price'), state.prices, '不计算 token 费用', p => `${p.provider} / ${p.model} · ${p.currency}`);
-  setSelectOptions($('#run-dataset'), state.datasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? '未准备' : `${d.item_count} ${d.unit || '样本'}`}`);
+  setSelectOptions($('#run-dataset'), state.datasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? (d.preparation && d.preparation.status !== 'error' ? `完整导入中 ${d.preparation.rows || d.preparation.files_done || 0}${d.preparation.rows ? '条' : '文件'}` : '未准备') : `${d.item_count} ${d.unit || '样本'}${d.kind?.startsWith('public:') && !d.complete ? '（未完整）' : ''}`}`);
   if (!$('#run-dataset').value) $('#run-dataset').value = state.datasets.find(d => d.ready !== false)?.id || '';
   renderDatasetInfo();
   $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)}</small><div class="target-actions"><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
