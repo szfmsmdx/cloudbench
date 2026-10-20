@@ -28,7 +28,7 @@ function view(name) {
 function setSelectOptions(select, items, placeholder, label) {
   const old = select.value;
   select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + items.map(item => `<option value="${escapeHtml(item.id)}" ${item.ready === false ? 'disabled' : ''}>${escapeHtml(label(item))}</option>`).join('');
-  if (items.some(item => item.id === old)) select.value = old;
+  if (items.some(item => item.id === old && item.ready !== false)) select.value = old;
 }
 function renderDatasetInfo() {
   const dataset = state.datasets.find(d => d.id === $('#run-dataset').value);
@@ -80,6 +80,10 @@ async function refresh() {
   const data = await api('/api/state');
   Object.assign(state, data);
   renderState();
+  clearTimeout(state.preparationPoll);
+  if (state.datasets.some(d => d.preparation && !['complete', 'error'].includes(d.preparation.status))) {
+    state.preparationPoll = setTimeout(() => refresh().catch(e => toast(e.message, true)), 10000);
+  }
 }
 function metric(label, value, unit, foot) {
   return `<div class="metric-card"><span>${label}</span><strong>${value}<em>${unit}</em></strong><small>${foot}</small></div>`;
