@@ -32,22 +32,23 @@ python server.py
 
 异步模式最大并发留空时不施加并发限制，对所有数据集一致；填写数值时按该上限执行。QPS仍独立控制到达速率：QPS=0且并发留空时尽快发起本次全部请求/会话；同步模式始终串行。Agent同一会话内部依次执行。数据库与CSV中的concurrency=0表示不限制，历史运行的有限并发记录保持原值。CSV 保留计划时间、实际发起时间和排队延迟，便于检查发压端是否达到目标速率。
 
-测试条数留空时，使用当前长度范围内的全部合格样本，每条一次；填写条数时从完整池中抽取指定数量，超过可用量会报错，不循环补足。
+网页必须填写本次测试条数；从完整池中抽取指定数量，超过可用量会报错，不循环补足。Agent 按会话填写，一次会话会产生多轮 API 请求。直接调用 HTTP API 时请明确传入 `request_count`；接口为兼容旧调用仍保留留空选全量的行为。
 
 ## 数据集
 
 - **LongBench**：本地官方原始集，4,750 条；不使用 LongBench-E。
 - **LongBench v2**：本地官方原始集，503 条；按所填模型上下文上限过滤超长样本。
 
-新增五套公开负载，准备后可在网页直接选择：
+另有四套公开负载，准备后可在网页直接选择：
 
 | 数据集 | 回放方式 | 来源 |
 | --- | --- | --- |
-| Open-SWE-Traces | 编码 Agent，保留历史与工具调用 | [NVIDIA](https://huggingface.co/datasets/nvidia/Open-SWE-Traces) |
 | SWE-smith trajectories | SWE-agent 多轮轨迹 | [SWE-bench](https://huggingface.co/datasets/SWE-bench/SWE-smith-trajectories) |
 | HotpotQA | 问题＋官方 distractor 段落 | [官方主页](https://hotpotqa.github.io/) |
 | CRAG | 问题＋清理后的网页检索材料 | [Meta](https://github.com/facebookresearch/CRAG) |
 | CRUD-RAG | 中文任务＋关联材料 | [官方仓库](https://github.com/IAAR-Shanghai/CRUD_RAG) |
+
+Open-SWE 已从网页测试选项和 `prepare all` 中移除；已有原始文件、旧结果和显式命令兼容保留，不删减其他数据集。
 
 ### 数据准备
 
@@ -56,14 +57,14 @@ python server.py
 ```powershell
 python -m pybench.prepare all
 # 只下载一套完整来源
-python -m pybench.prepare open-swe
+python -m pybench.prepare swe-smith
 # Hugging Face 无法连接时，使用镜像下载文件
-python -m pybench.prepare open-swe --endpoint https://hf-mirror.com
+python -m pybench.prepare swe-smith --endpoint https://hf-mirror.com
 # 已下载的原始 JSON、JSONL 或 JSONL.bz2
 python -m pybench.prepare crag --input path/to/crag.jsonl.bz2
 ```
 
-创建测试时，按本次条数从完整来源抽取记录，再用原有 Kimi K3 口径进行长度筛选；不预先计算整个数据集。筛选不合格时继续检查其他记录，不重复补足；条数留空代表主动选择全部合格记录，因此需要检查全量。必要的分词文件首次使用时下载，不加载模型或运行下载的 Python。长度包含正文、历史和工具定义的JSON表示；多轮历史按消息累加参考长度，未应用目标模型聊天模板。实际用量取接口 usage。
+创建测试时，按本次条数从完整来源抽取记录，再用原有 Kimi K3 口径进行长度筛选；不预先计算整个数据集。筛选不合格时继续检查其他记录，不重复补足。必要的分词文件首次使用时下载，不加载模型或运行下载的 Python。长度包含正文、历史和工具定义的JSON表示；多轮历史按消息累加参考长度，未应用目标模型聊天模板。实际用量取接口 usage。
 
 `datasets/raw/` 保留完整来源文件和清单。原始文件齐全即可选用，不等待全量转换；Parquet按所选记录所在行组读取，跳过无需发送的大补丁字段。所有选中记录的读取、消息适配和长度检查均在测速计时前完成，发压时使用固定输入。未适配或长度不符的记录不会发送；可用量不足时在发起请求前报错。已完成的旧索引继续兼容，用于保持已有筛选和抽样结果，不自动重建。原始记录和大文件不上传 GitHub。
 

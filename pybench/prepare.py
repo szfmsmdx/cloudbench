@@ -304,7 +304,8 @@ def main():
     if (args.input or args.manifest) and args.dataset == "all":
         parser.error("--input / --manifest 需要指定单个数据集")
     failed = False
-    for key in CATALOG if args.dataset == "all" else [args.dataset]:
+    keys = [key for key in CATALOG if key != "open-swe"] if args.dataset == "all" else [args.dataset]
+    for key in keys:
         try:
             info = prepare(ROOT, key, source=args.input, manifest_path=args.manifest, endpoint=args.endpoint)
             print(f"{key}: {info['source_total']} original records ready; no full token/index build", flush=True)

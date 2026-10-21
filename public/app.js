@@ -73,8 +73,9 @@ function renderState() {
   $('#price-count').textContent = state.prices.length;
   setSelectOptions($('#run-target'), state.targets, state.targets.length ? '请选择端点' : '请先添加端点', t => `${t.name} · ${t.model}`);
   setSelectOptions($('#run-price'), state.prices, '不计算 token 费用', p => `${p.provider} / ${p.model} · ${p.currency}`);
-  setSelectOptions($('#run-dataset'), state.datasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? (d.preparation && d.preparation.status !== 'error' ? `下载中 ${d.preparation.files_done || 0} 文件` : '未准备') : `${d.item_count} ${d.format === 'raw-source-v1' ? (d.category === 'agent' ? '个会话记录' : '条原始记录') : d.unit || '样本'}${d.kind?.startsWith('public:') && !d.complete ? '（未完整）' : ''}`}`);
-  if (!$('#run-dataset').value) $('#run-dataset').value = state.datasets.find(d => d.ready !== false)?.id || '';
+  const selectableDatasets = state.datasets.filter(d => d.kind !== 'public:open-swe');
+  setSelectOptions($('#run-dataset'), selectableDatasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? (d.preparation && d.preparation.status !== 'error' ? `下载中 ${d.preparation.files_done || 0} 文件` : '未准备') : `${d.item_count} ${d.format === 'raw-source-v1' ? (d.category === 'agent' ? '个会话记录' : '条原始记录') : d.unit || '样本'}${d.kind?.startsWith('public:') && !d.complete ? '（未完整）' : ''}`}`);
+  if (!$('#run-dataset').value) $('#run-dataset').value = selectableDatasets.find(d => d.ready !== false)?.id || '';
   renderDatasetInfo();
   $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)}</small><div class="target-actions"><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
   $('#price-rows').innerHTML = state.prices.length ? state.prices.map(p => `<tr><td><strong>${escapeHtml(p.provider)}</strong><small>${escapeHtml(p.model)}</small></td><td>${fmt(p.input_price, 6)}</td><td>${fmt(p.cache_read_price, 6)}</td><td>${fmt(p.cache_write_price, 6)}</td><td>${fmt(p.output_price, 6)}</td><td>${escapeHtml(p.currency)}</td><td>${escapeHtml(p.checked_at)}</td><td>${p.source_url ? `<a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">查看 ↗</a>` : '—'}</td></tr>`).join('') : '<tr><td colspan="8"><div class="empty">暂无价格。录入后可在创建测试时选择。</div></td></tr>';
@@ -217,6 +218,14 @@ $('#run-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  if (!Number.isSafeInteger(Number(data.request_count)) || Number(data.request_count) < 1) {
+    toast('请填写本次测试条数或 Agent 会话数，不能留空运行全量', true);
+    return;
+  }
+  if (data.dataset_id === 'public:open-swe') {
+    toast('Open-SWE 已从网页测试选项中移除，请选择其他数据集', true);
+    return;
+  }
   data.include_usage = form.elements.include_usage.checked;
   data.max_input_tokens = Number(data.context_limit_k) * 1024;
   delete data.context_limit_k;
