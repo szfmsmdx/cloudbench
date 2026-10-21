@@ -1,4 +1,4 @@
-"""Run OpenAI-compatible streaming benchmarks from a JSON configuration on stdin.
+"""Run OpenAI/Anthropic streaming benchmarks from a JSON configuration on stdin.
 
 Each stdout line is one JSON event: start, sample, done, or error. Diagnostics go
 to stderr. The browser/API process can persist samples without doing load work.
@@ -21,6 +21,7 @@ from typing import Any, Awaitable, Callable
 import aiohttp
 
 from pybench.datasets import load_local_items
+from pybench.protocols import anthropic_output, endpoint_url, protocol_for, request_body
 from pybench.telemetry import RunTelemetry
 from pybench.workloads import hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, turn_count
 
@@ -31,11 +32,6 @@ def utc_now() -> str:
 
 def emit(event: dict[str, Any]) -> None:
     print(json.dumps(event, ensure_ascii=False, separators=(",", ":")), flush=True)
-
-
-def endpoint_url(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    return base + ("/chat/completions" if base.endswith("/v1") else "/v1/chat/completions")
 
 
 def usage_from(raw: Any) -> dict[str, Any]:
@@ -54,6 +50,11 @@ def usage_from(raw: Any) -> dict[str, Any]:
     if cached is None:
         cached = nonnegative((usage.get("input_tokens_details") or {}).get("cached_tokens"))
     writes = nonnegative(usage.get("cache_creation_input_tokens"))
+    anthropic_input = nonnegative(usage.get('input_tokens'))
+    if 'cache_read_input_tokens' in usage:
+        cached = nonnegative(usage['cache_read_input_tokens'])
+        if anthropic_input is not None and 'prompt_tokens' not in usage:
+            prompt = anthropic_input + (cached or 0) + (writes or 0)
     misses = nonnegative(usage.get("prompt_cache_miss_tokens"))
     uncached = misses if misses is not None else (
         max(prompt - cached - (writes or 0), 0) if prompt is not None and cached is not None else None
@@ -118,20 +119,20 @@ async def measure_request(
     finish_reason = None
     target, run = config["target"], config["run"]
     key = target.get("api_key") or ""
-    payload = {
-        "model": target["model"],
-        "messages": item["messages"],
-        "max_tokens": run["max_tokens"],
-        "stream": True,
-    }
-    if item.get("tools"):
-        payload["tools"] = item["tools"]
-    if run.get("include_usage", True):
-        payload["stream_options"] = {"include_usage": True}
+    anthropic = protocol_for(target['base_url']) == 'anthropic'
     headers = {"Content-Type": "application/json"}
-    if key:
+    if anthropic:
+        headers['anthropic-version'] = '2023-06-01'
+        if key:
+            headers['x-api-key'] = key
+    elif key:
         headers["Authorization"] = f"Bearer {key}"
     try:
+        payload = request_body(target, run, item)
+        # Protocol adaptation is client preparation, not inference time.
+        started = loop.time()
+        started_at = utc_now()
+        sent_offset_ms = (started - run_start) * 1000
         async with session.post(endpoint_url(target["base_url"]), json=payload, headers=headers) as response:
             http_status = response.status
             if response.status >= 400:
@@ -140,9 +141,10 @@ async def measure_request(
             if "text/event-stream" in response.headers.get("Content-Type", ""):
                 decoder = codecs.getincrementaldecoder("utf-8")()
                 buffer = ""
+                stream_finished = False
 
                 def consume(event: str) -> None:
-                    nonlocal first_output, usage, output_seen, finish_reason
+                    nonlocal first_output, usage, output_seen, finish_reason, stream_finished
                     data = "\n".join(line[5:].lstrip() for line in event.splitlines() if line.startswith("data:"))
                     if not data or data == "[DONE]":
                         return
@@ -153,6 +155,23 @@ async def measure_request(
                     if chunk.get("error"):
                         detail = chunk["error"]
                         raise RuntimeError(str(detail.get("message", detail)) if isinstance(detail, dict) else str(detail))
+                    if anthropic:
+                        message = chunk.get('message') or {}
+                        extra_usage = message.get('usage') if chunk.get('type') == 'message_start' else chunk.get('usage')
+                        if isinstance(extra_usage, dict):
+                            usage = {**(usage or {}), **extra_usage}
+                            if on_progress:
+                                on_progress(usage_from(usage)['completion_tokens'], False)
+                        finish_reason = (chunk.get('delta') or {}).get('stop_reason') or finish_reason
+                        if chunk.get('type') == 'message_stop':
+                            stream_finished = True
+                        if anthropic_output(chunk):
+                            if on_progress:
+                                on_progress(None, True)
+                            output_seen = True
+                            if first_output is None:
+                                first_output = loop.time()
+                        return
                     for choice in chunk.get("choices") or []:
                         finish_reason = choice.get("finish_reason") or finish_reason
                     if chunk.get("usage"):
@@ -174,13 +193,19 @@ async def measure_request(
                 buffer += decoder.decode(b"", final=True)
                 if buffer.strip():
                     consume(buffer)
+                if anthropic and not stream_finished:
+                    raise RuntimeError('Anthropic 流在 message_stop 之前中断')
             else:
                 body = await response.json()
                 usage = body.get("usage")
-                choice = (body.get("choices") or [{}])[0]
-                message = choice.get("message", {})
-                finish_reason = choice.get("finish_reason")
-                output_seen = bool(message.get("content") or message.get("tool_calls") or message.get("reasoning_content") or message.get("reasoning"))
+                if anthropic:
+                    finish_reason = body.get('stop_reason')
+                    output_seen = any(anthropic_output({'type': 'content_block_start', 'content_block': block}) for block in body.get('content') or [])
+                else:
+                    choice = (body.get("choices") or [{}])[0]
+                    message = choice.get("message", {})
+                    finish_reason = choice.get("finish_reason")
+                    output_seen = bool(message.get("content") or message.get("tool_calls") or message.get("reasoning_content") or message.get("reasoning"))
             if not output_seen:
                 raise RuntimeError("响应没有生成内容")
     except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:

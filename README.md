@@ -1,6 +1,6 @@
 # CloudBench
 
-本地运行的 OpenAI 兼容接口压测工具。网页服务、管理 API、数据库、压测和测试全部使用 Python。浏览器页面使用原生 HTML/CSS/JavaScript，无构建步骤。
+本地运行的 OpenAI / Anthropic 兼容接口压测工具。网页服务、管理 API、数据库、压测和测试全部使用 Python。浏览器页面使用原生 HTML/CSS/JavaScript，无构建步骤。
 
 | 路径 | 用途 |
 | --- | --- |
@@ -19,6 +19,8 @@ python server.py
 ```
 
 打开 <http://127.0.0.1:3876>。服务和压测进程使用同一个 Python 解释器。本机已用 Python 3.13 验证。可通过 `CLOUDBENCH_PORT` 修改端口，或通过 `CLOUDBENCH_DATA_DIR` 指定数据库目录。
+
+端点支持Base URL或完整接口地址：完整`/chat/completions`、`/messages`路径原样使用；`/anthropic`前缀或`api.anthropic.com`使用Messages协议，其余Base URL使用Chat Completions协议。例如DeepSeek的`https://api.deepseek.com/anthropic`对应`/anthropic/v1/messages`。Anthropic适配消息、system、工具调用、流式事件及usage，不把两种协议的字段混用；缺少原生签名的reasoning_content历史无法无损转换时明确报错，不静默删减内容。密钥仍只保存在网页服务进程内存，服务重启后需要重新设置。
 
 ## 发压方式
 
