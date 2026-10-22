@@ -20,7 +20,7 @@ python server.py
 
 打开 <http://127.0.0.1:3876>。服务和压测进程使用同一个 Python 解释器。本机已用 Python 3.13 验证。可通过 `CLOUDBENCH_PORT` 修改端口，或通过 `CLOUDBENCH_DATA_DIR` 指定数据库目录。
 
-端点支持Base URL或完整接口地址：完整`/chat/completions`、`/messages`路径原样使用；`/anthropic`前缀或`api.anthropic.com`使用Messages协议，其余Base URL使用Chat Completions协议。例如DeepSeek的`https://api.deepseek.com/anthropic`对应`/anthropic/v1/messages`。Anthropic适配消息、system、工具调用、流式事件及usage，不把两种协议的字段混用；缺少原生签名的reasoning_content历史无法无损转换时明确报错，不静默删减内容。密钥仍只保存在网页服务进程内存，服务重启后需要重新设置。
+端点连接：粘贴服务地址或完整接口 URL，API Key 可留空。点击“连接并识别”后先尝试获取模型列表：只有一个模型时自动选用，多个时提示选择，服务未提供列表时提示填写模型名称。随后发送最多 8 个输出 token 的短请求，验证 OpenAI Chat Completions 或 Anthropic Messages 接口，成功后才保存实际请求地址与协议。验证请求不计入压测记录；可能产生少量 API 费用。完整标准接口路径原样验证，自定义路径先原样尝试，再检查常见子路径；不跟随重定向。无法识别时可在高级设置指定格式，此时 URL 必须是完整接口地址。旧端点可点击“重新连接”；首次压测前也会自动验证尚未确认的端点。密钥只保存在服务进程内存，重启后需要重新设置。Anthropic 的消息、工具调用、流式事件和 usage 独立适配；无法无损转换的 reasoning_content 历史仍明确报错。
 
 ## 发压方式
 

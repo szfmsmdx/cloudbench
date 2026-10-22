@@ -77,7 +77,7 @@ function renderState() {
   setSelectOptions($('#run-dataset'), selectableDatasets, '请选择数据集', d => `${d.name} · ${d.ready === false ? (d.preparation && d.preparation.status !== 'error' ? `下载中 ${d.preparation.files_done || 0} 文件` : '未准备') : `${d.item_count} ${d.format === 'raw-source-v1' ? (d.category === 'agent' ? '个会话记录' : '条原始记录') : d.unit || '样本'}${d.kind?.startsWith('public:') && !d.complete ? '（未完整）' : ''}`}`);
   if (!$('#run-dataset').value) $('#run-dataset').value = selectableDatasets.find(d => d.ready !== false)?.id || '';
   renderDatasetInfo();
-  $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)}</small><div class="target-actions"><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
+  $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)} · ${t.checked_at ? "已验证连接" : "待验证连接"}</small>${t.endpoint_url ? `<small>请求地址：${escapeHtml(t.endpoint_url)}</small>` : ""}<div class="target-actions"><button type="button" class="mini-button" data-action="connect-target" data-id="${escapeHtml(t.id)}">重新连接</button><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
   $('#price-rows').innerHTML = state.prices.length ? state.prices.map(p => `<tr><td><strong>${escapeHtml(p.provider)}</strong><small>${escapeHtml(p.model)}</small></td><td>${fmt(p.input_price, 6)}</td><td>${fmt(p.cache_read_price, 6)}</td><td>${fmt(p.cache_write_price, 6)}</td><td>${fmt(p.output_price, 6)}</td><td>${escapeHtml(p.currency)}</td><td>${escapeHtml(p.checked_at)}</td><td>${p.source_url ? `<a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">查看 ↗</a>` : '—'}</td></tr>`).join('') : '<tr><td colspan="8"><div class="empty">暂无价格。录入后可在创建测试时选择。</div></td></tr>';
   $('#overview-recent').innerHTML = state.runs.length ? state.runs.slice(0, 4).map(r => `<a href="#history" class="recent-item" data-run="${escapeHtml(r.id)}"><div><strong>${escapeHtml(r.target_name)}</strong><small>${escapeHtml(r.model)} · ${dateTime(r.started_at)}</small></div>${statusHtml(r.status)}</a>`).join('') : '<div class="empty">第一次测试的结果会出现在这里。</div>';
   $('#history-rows').innerHTML = state.runs.length ? state.runs.map(r => `<tr><td>${dateTime(r.started_at)}</td><td><strong>${escapeHtml(r.target_name)}</strong></td><td>${escapeHtml(r.model)}</td><td>${r.request_count}</td><td>${statusHtml(r.status)}</td><td><button type="button" class="mini-button" data-run="${escapeHtml(r.id)}">查看结果 →</button></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty">暂无运行记录。</div></td></tr>';
@@ -173,6 +173,14 @@ document.addEventListener('click', async event => {
   if (!action) return;
   const id = action.dataset.id;
   if (action.dataset.action === 'select-target') { $('#run-target').value = id; $('#run-panel').scrollIntoView({ behavior: 'smooth' }); return; }
+  if (action.dataset.action === 'connect-target') {
+    action.disabled = true;
+    action.textContent = '连接中…';
+    try { await api(`/api/targets/${id}/connect`, { method: 'POST', body: '{}' }); await refresh(); toast('连接成功'); }
+    catch (e) { toast(e.message, true); }
+    finally { action.disabled = false; action.textContent = '重新连接'; }
+    return;
+  }
   if (action.dataset.action === 'set-key') {
     const key = prompt('输入此端点的 API Key（只保存在当前服务进程内存中）');
     if (!key) return;
@@ -184,11 +192,50 @@ document.addEventListener('click', async event => {
   }
 });
 $('#hero-start').addEventListener('click', () => { view('targets'); $('#run-panel').scrollIntoView({ behavior: 'smooth' }); });
+function resetTargetDiscovery() {
+  $('#target-model-fields').hidden = true;
+  $('#target-model-select').innerHTML = '<option value="">请选择模型</option>';
+  $('#target-form').elements.model.value = '';
+  $('#target-connection-status').textContent = '';
+}
+$('#target-form').elements.base_url.addEventListener('input', resetTargetDiscovery);
+$('#target-form').elements.api_key.addEventListener('input', resetTargetDiscovery);
+$('#target-form').elements.protocol.addEventListener('change', resetTargetDiscovery);
+$('#target-model-select').addEventListener('change', event => {
+  $('#target-form').elements.model.value = event.target.value;
+});
 $('#target-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
-  try { const target = await api('/api/targets', { method: 'POST', body: JSON.stringify(data) }); form.reset(); await refresh(); $('#run-target').value = target.id; toast('端点已保存'); } catch (e) { toast(e.message, true); }
+  const button = form.querySelector('button[type="submit"]');
+  const note = $('#target-connection-status');
+  const inputs = [...form.querySelectorAll('input, select, button')];
+  inputs.forEach(el => { el.disabled = true; });
+  button.textContent = '正在连接…';
+  note.textContent = '正在获取模型并验证连接，请稍候…';
+  try {
+    const target = await api('/api/targets', { method: 'POST', body: JSON.stringify(data) });
+    if (target.status === 'needs_model') {
+      $('#target-model-fields').hidden = false;
+      $('#target-model-select').innerHTML = '<option value="">请选择模型</option>' + target.models.map(model => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
+      $('#target-model-select').parentElement.hidden = !target.models.length;
+      note.textContent = target.message;
+    } else {
+      form.reset(); resetTargetDiscovery();
+      await refresh(); $('#run-target').value = target.id;
+      note.textContent = `已连接 ${target.model}，端点已保存。`;
+      toast('连接成功，端点已保存');
+    }
+  } catch (e) {
+    note.textContent = e.message;
+    $('#target-model-fields').hidden = false;
+    $('#target-advanced').open = true;
+    toast(e.message, true);
+  } finally {
+    inputs.forEach(el => { el.disabled = false; });
+    button.textContent = '连接并识别 ↗';
+  }
 });
 $('#price-form').addEventListener('submit', async event => {
   event.preventDefault();

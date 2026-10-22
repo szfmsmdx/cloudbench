@@ -21,9 +21,17 @@ def endpoint_url(base_url):
     return base + (suffix if path.endswith('/v1') else '/v1' + suffix)
 
 
+def target_protocol(target):
+    return target.get('protocol') or protocol_for(target['base_url'])
+
+
+def target_endpoint(target):
+    return target.get('endpoint_url') or endpoint_url(target['base_url'])
+
+
 def request_body(target, run, item):
     body = {'model': target['model'], 'messages': item['messages'], 'max_tokens': run['max_tokens'], 'stream': True}
-    if protocol_for(target['base_url']) == 'openai':
+    if target_protocol(target) == 'openai':
         if item.get('tools'):
             body['tools'] = item['tools']
         if run.get('include_usage', True):

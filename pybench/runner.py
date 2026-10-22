@@ -21,7 +21,7 @@ from typing import Any, Awaitable, Callable
 import aiohttp
 
 from pybench.datasets import load_local_items
-from pybench.protocols import anthropic_output, endpoint_url, protocol_for, request_body
+from pybench.protocols import anthropic_output, target_endpoint, target_protocol, request_body
 from pybench.telemetry import RunTelemetry
 from pybench.workloads import hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, turn_count
 
@@ -119,7 +119,7 @@ async def measure_request(
     finish_reason = None
     target, run = config["target"], config["run"]
     key = target.get("api_key") or ""
-    anthropic = protocol_for(target['base_url']) == 'anthropic'
+    anthropic = target_protocol(target) == 'anthropic'
     headers = {"Content-Type": "application/json"}
     if anthropic:
         headers['anthropic-version'] = '2023-06-01'
@@ -133,7 +133,7 @@ async def measure_request(
         started = loop.time()
         started_at = utc_now()
         sent_offset_ms = (started - run_start) * 1000
-        async with session.post(endpoint_url(target["base_url"]), json=payload, headers=headers) as response:
+        async with session.post(target_endpoint(target), json=payload, headers=headers, allow_redirects=False) as response:
             http_status = response.status
             if response.status >= 400:
                 detail = (await response.text())[:300]

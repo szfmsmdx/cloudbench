@@ -28,6 +28,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             "name": "模拟模型", "base_url": str(self.mock.make_url("/v1")),
             "model": "mock-1", "api_key": "test-secret",
         }, 201)
+        self.requests.clear()  # Connection validation is outside the benchmark.
 
     async def asyncTearDown(self):
         await self.client.close()

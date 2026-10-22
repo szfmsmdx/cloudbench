@@ -249,6 +249,7 @@ class PublicWorkloadAPITests(unittest.IsolatedAsyncioTestCase):
         await self.client.start_server()
         response = await self.client.post("/api/targets", json={"name": "mock", "model": "mock", "base_url": str(self.mock.make_url("/v1"))})
         self.target = await response.json()
+        self.payloads.clear()  # Connection validation does not replay a workload.
 
     async def asyncTearDown(self):
         await self.client.close()

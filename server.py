@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from pybench.connection import connect
 from pybench.datasets import eligible_count, length_distribution, token_counts
 from pybench.workloads import catalog, select_for_run, turn_count
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
@@ -162,6 +163,7 @@ class CloudBench:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         migrations = {
+            "targets": {"protocol": "TEXT", "endpoint_url": "TEXT", "checked_at": "TEXT"},
             "runs": {"dataset_id": "TEXT", "dataset_name": "TEXT", "mode": "TEXT", "request_rate": "REAL",
                      "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER",
                      "unit_count": "INTEGER", "min_input_tokens": "INTEGER", "request_timeout": "REAL",
@@ -181,6 +183,7 @@ class CloudBench:
         self.app = web.Application(middlewares=[errors], client_max_size=1_000_000)
         self.app.add_routes([
             web.get("/api/state", self.state), web.post("/api/targets", self.create_target),
+            web.post("/api/targets/{id}/connect", self.reconnect_target),
             web.post("/api/targets/{id}/key", self.set_key), web.delete("/api/targets/{id}", self.delete_target),
             web.post("/api/prices", self.create_price), web.post("/api/runs", self.create_run),
             web.get("/api/runs/{id}", self.get_run), web.post("/api/runs/{id}/cancel", self.cancel_run),
@@ -228,14 +231,40 @@ class CloudBench:
 
     async def create_target(self, request: web.Request) -> web.Response:
         body = await body_json(request)
-        target = {"id": str(uuid.uuid4()), "name": required_string(body.get("name"), "名称", 100),
-                  "base_url": http_url(body.get("base_url"), "Base URL", base=True),
-                  "model": required_string(body.get("model"), "模型 ID", 200), "created_at": utc_now()}
+        url = http_url(body.get("base_url"), "服务地址", base=True)
+        model = required_string(body['model'], "模型 ID", 200) if body.get('model') else None
+        name = required_string(body['name'], "名称", 100) if body.get('name') else None
+        protocol = body.get('protocol') or None
+        if protocol not in (None, 'openai', 'anthropic'):
+            raise ApiError('接口格式无效')
         key = required_string(body["api_key"], "API Key", 4000) if body.get("api_key") else None
+        result = await connect(url, key, model, protocol)
+        if result['status'] != 'connected':
+            return json_response(result)
+        target = {"id": str(uuid.uuid4()), "name": name or result['model'][:100],
+                  "base_url": url, "model": result['model'], "created_at": utc_now(),
+                  **{k: result[k] for k in ('protocol', 'endpoint_url', 'checked_at')}}
         self.insert("targets", target)
         if key:
             self.credentials[target["id"]] = key
-        return json_response({**target, "has_key": bool(key)}, 201)
+        return json_response({**target, "has_key": bool(key), "status": "connected"}, 201)
+
+    async def verify_target(self, target):
+        result = await connect(target.get('endpoint_url') or target['base_url'],
+                               self.credentials.get(target['id']), target['model'],
+                               target.get('protocol') if target.get('endpoint_url') else None)
+        if not self.one('SELECT id FROM targets WHERE id=?', (target['id'],)):
+            raise ApiError('目标不存在', 404)
+        self.db.execute('UPDATE targets SET protocol=?,endpoint_url=?,checked_at=? WHERE id=?',
+                        (result['protocol'], result['endpoint_url'], result['checked_at'], target['id']))
+        target.update({k: result[k] for k in ('protocol', 'endpoint_url', 'checked_at')})
+        return result
+
+    async def reconnect_target(self, request):
+        target = self.one('SELECT * FROM targets WHERE id=?', (request.match_info['id'],))
+        if target is None:
+            raise ApiError('目标不存在', 404)
+        return json_response(await self.verify_target(target))
 
     async def set_key(self, request: web.Request) -> web.Response:
         target_id = request.match_info["id"]
@@ -275,6 +304,12 @@ class CloudBench:
         target = self.one("SELECT * FROM targets WHERE id=?", (body.get("target_id"),))
         if target is None:
             raise ApiError("目标不存在", 404)
+        if not target.get('endpoint_url'):
+            self.preparing = True
+            try:
+                await self.verify_target(target)
+            finally:
+                self.preparing = False
         price = self.one("SELECT * FROM prices WHERE id=?", (body["price_id"],)) if body.get("price_id") else None
         if body.get("price_id") and price is None:
             raise ApiError("价格版本不存在")
@@ -370,7 +405,8 @@ class CloudBench:
             if active.cancelled:
                 process.terminate()
             else:
-                config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None},
+                config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None,
+                                     "endpoint_url": target.get('endpoint_url'), "protocol": target.get('protocol')},
                           "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms")},
                           "dataset": {"kind": dataset["kind"], "sha256": dataset.get("sha256"), "root": str(self.root)}, "price": price}
                 if "selected" in dataset:
