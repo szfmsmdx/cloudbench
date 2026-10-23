@@ -7,6 +7,8 @@
 /* Keep the optional/limit notes on the same caption line so adjacent controls align. */
 .form label:not(.check-label){position:relative;white-space:nowrap}
 .form label .optional,.form label .hint{position:absolute;top:0;right:0;line-height:1.55}
+.advanced-fields{display:flex;flex-direction:column;gap:15px;padding-top:12px}
+.advanced-fields .field-note{margin:0;line-height:1.6;overflow-wrap:anywhere}
 
 /* Benchmark builder */
 .run-form{gap:18px}
