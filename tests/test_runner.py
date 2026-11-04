@@ -192,6 +192,11 @@ class LocalDatasetTests(unittest.TestCase):
             self.assertIn("Q2?", content)
             self.assertIn("A. no", content)
             self.assertLess(content.count("x"), 200)
+            legacy = load_local_items("local-longbench-v2-trunc", root, 2048, 128, truncate_ratio=.89)
+            keep = int(200 * int((2048 - 128 - 512) * .89) / 2000)
+            self.assertEqual(legacy[1]['messages'][0]['content'],
+                             'x' * keep + '\n\nQ2?\nA. no\nB. \nC. \nD. \n请从 A、B、C、D 中选择正确答案。')
+            self.assertNotEqual(legacy[1]['messages'][0]['content'], content)
 
 
 class TelemetryTests(unittest.TestCase):

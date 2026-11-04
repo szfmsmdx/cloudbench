@@ -56,14 +56,14 @@ def eligible_count(kind: str, root: Path, context_limit: int, output_limit: int,
     return count
 
 
-def truncate_context(context: str, count: int, prompt_limit: int) -> str:
+def truncate_context(context: str, count: int, prompt_limit: int, ratio: float = TRUNCATE_RATIO) -> str:
     """Keep a proportional head of the context; questions and choices stay intact."""
-    target = max(1, int(prompt_limit * TRUNCATE_RATIO))
+    target = max(1, int(prompt_limit * ratio))
     keep = max(1, int(len(context) * target / max(1, count)))
     return context[:keep]
 
 
-def load_local_items(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0) -> list[dict[str, Any]]:
+def load_local_items(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0, truncate_ratio: float = TRUNCATE_RATIO) -> list[dict[str, Any]]:
     # The tokenizer counts omit the chat template. Keep a small reserve for it.
     prompt_limit = prompt_budget(context_limit, output_limit)
     truncate = kind in TRUNCATE_KINDS
@@ -110,8 +110,8 @@ def load_local_items(kind: str, root: Path, context_limit: int, output_limit: in
                 if not truncate and counts[index] > prompt_limit:
                     continue
                 context = row.get('context') or ''
-                if truncate and counts[index] > prompt_limit * TRUNCATE_RATIO:
-                    context = truncate_context(context, counts[index], prompt_limit)
+                if truncate and counts[index] > prompt_limit * truncate_ratio:
+                    context = truncate_context(context, counts[index], prompt_limit, truncate_ratio)
                 choices = "\n".join(f"{letter}. {row.get(f'choice_{letter}', '')}" for letter in "ABCD")
                 text = f"{context}\n\n{row.get('question') or ''}\n{choices}\n请从 A、B、C、D 中选择正确答案。"
                 items.append({"index": index, "messages": [{"role": "user", "content": text}]})

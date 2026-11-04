@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 
 import aiohttp
 
-from pybench.datasets import load_local_items
+from pybench.datasets import TRUNCATE_RATIO, load_local_items
 from pybench.protocols import anthropic_output, target_endpoint, target_protocol, request_body
 from pybench.telemetry import RunTelemetry
 from pybench.workloads import hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, turn_count
@@ -291,7 +291,7 @@ async def run(config: dict[str, Any]) -> None:
             units = [hydrate_workload(root, kind, unit) for unit in chosen]
         items = units
     else:
-        items = load_local_items(kind, root, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0))
+        items = load_local_items(kind, root, run_config["max_input_tokens"], run_config["max_tokens"], run_config.get("min_input_tokens", 0), run_config.get("truncate_ratio", TRUNCATE_RATIO))
     rng = random.Random(run_config.get("seed", 42))
     order = list(range(len(items)))
     rng.shuffle(order)
@@ -299,7 +299,7 @@ async def run(config: dict[str, Any]) -> None:
     # aiohttp limit=0 disables its own connection cap as well as our scheduler's.
     # Uvicorn closes idle keep-alive connections after 5s; reusing one produces
     # spurious "Server disconnected" errors during long benchmark runs.
-    connector = aiohttp.TCPConnector(limit=run_config["concurrency"], force_close=True)
+    connector = aiohttp.TCPConnector(limit=run_config["concurrency"], force_close=bool(run_config.get("force_close", True)))
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         loop = asyncio.get_running_loop()
         run_start = loop.time()

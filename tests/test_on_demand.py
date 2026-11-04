@@ -116,7 +116,8 @@ class OnDemandWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         config = {'target_id': self.target['id'], 'dataset_id': 'public:open-swe',
                   'mode': 'sync', 'request_count': 1, 'max_tokens': 128,
-                  'ignore_eos': True, 'chat_template_kwargs': {'enable_thinking': False}}
+                  'ignore_eos': True, 'chat_template_kwargs': {'enable_thinking': False},
+                  'truncate_ratio': .89, 'force_close': False}
         for invalid in (False, [], 'chat'):
             response = await self.client.post('/api/runs', json={**config, 'chat_template_kwargs': invalid})
             self.assertEqual(response.status, 400, await response.text())
@@ -140,6 +141,8 @@ class OnDemandWorkerTests(unittest.IsolatedAsyncioTestCase):
         saved = await (await self.client.get(f"/api/runs/{run['id']}")).json()
         self.assertEqual(saved['run']['chat_template_kwargs'], {'enable_thinking': False})
         self.assertEqual(saved['run']['ignore_eos'], 1)
+        self.assertEqual(saved['run']['truncate_ratio'], .89)
+        self.assertEqual(saved['run']['force_close'], 0)
 
     async def test_slow_input_preparation_finishes_before_measured_run_and_preserves_usage(self):
         source = self.root / 'original.jsonl'

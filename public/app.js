@@ -114,6 +114,32 @@ function renderRun(data) {
   $('#result-title').textContent = `${run.target_name} · ${run.model}`;
   $('#result-subtitle').textContent = `${dateTime(run.started_at)} · ${run.dataset_name || '旧版提示词'} · ${run.mode === 'async' ? `异步 ${run.request_rate === 0 ? '突发' : `${run.request_rate} QPS`} / 并发${run.concurrency === 0 ? '不限制' : ` ${run.concurrency}`}` : '同步串行'} · ${run.request_count} 个请求`;
   if (run.unit_count && run.unit_count !== run.request_count) $('#result-subtitle').textContent += ` · ${run.unit_count} 个会话`;
+  let configPanel = $('#result-config');
+  if (!configPanel) {
+    configPanel = document.createElement('dl');
+    configPanel.id = 'result-config';
+    configPanel.className = 'result-config';
+    $('#result-panel .result-heading').insertAdjacentElement('afterend', configPanel);
+  }
+  const kwargs = run.chat_template_kwargs;
+  const thinking = kwargs == null ? '未记录（服务默认）'
+    : kwargs.enable_thinking === false || kwargs.thinking === false || kwargs.reasoning_effort === 'none' ? '关闭'
+    : kwargs.reasoning_effort != null ? `开启 · ${kwargs.reasoning_effort}` : '服务默认（未覆盖）';
+  const config = [
+    ['上下文上限', `${fmt(run.max_input_tokens, 0)} token`],
+    ['输出上限', `${fmt(run.max_tokens, 0)} token`],
+    ['输出模式', run.ignore_eos ? '定长输出 · 忽略 EOS' : '自然 EOS'],
+    ['思考模式', thinking],
+    ['目标 QPS', run.mode === 'sync' ? '同步串行' : run.request_rate === 0 ? '0 · 尽快补发' : fmt(run.request_rate)],
+    ['最大并发', run.concurrency === 0 ? '不限制' : fmt(run.concurrency, 0)],
+    ['单请求超时', `${fmt(run.request_timeout, 0)} 秒`],
+    ['流式 usage', run.include_usage ? '开启' : '关闭'],
+    ['随机种子', fmt(run.seed, 0)],
+    ['最短输入', `${fmt(run.min_input_tokens, 0)} token`],
+    ['截断比例', run.truncate_ratio == null ? '未记录' : fmt(run.truncate_ratio, 2)],
+    ['HTTP 连接', run.force_close == null ? '未记录' : run.force_close ? '每请求新连接' : '复用长连接']
+  ];
+  configPanel.innerHTML = config.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('');
   $('#run-status').textContent = ({ running: '测试运行中', completed: '测试完成', cancelled: '测试已停止', error: '测试失败' })[run.status] || run.status;
   $('#run-progress').textContent = `${s.completed} / ${run.request_count}`;
   $('#run-progress-bar').style.width = `${Math.min(100, s.completed / run.request_count * 100)}%`;

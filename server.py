@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from aiohttp import web
 
 from pybench.connection import connect
-from pybench.datasets import eligible_count, length_distribution, token_counts
+from pybench.datasets import TRUNCATE_RATIO, eligible_count, length_distribution, token_counts
 from pybench.workloads import catalog, select_for_run, turn_count
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
 from pybench.quality import Quality
@@ -169,7 +169,8 @@ class CloudBench:
             "runs": {"dataset_id": "TEXT", "dataset_name": "TEXT", "mode": "TEXT", "request_rate": "REAL",
                      "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER",
                      "unit_count": "INTEGER", "min_input_tokens": "INTEGER", "request_timeout": "REAL",
-                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER", "chat_template_kwargs": "TEXT"},
+                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER", "chat_template_kwargs": "TEXT",
+                     "truncate_ratio": "REAL", "force_close": "INTEGER"},
             "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL",
                         "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT"},
         }
@@ -357,6 +358,10 @@ class CloudBench:
         chat_template_kwargs = body.get("chat_template_kwargs")
         if chat_template_kwargs is not None and not isinstance(chat_template_kwargs, dict):
             raise ApiError("chat_template_kwargs 必须是 JSON 对象")
+        truncate_ratio = number(body.get("truncate_ratio", TRUNCATE_RATIO), "截断比例", .01, 1)
+        force_close = body.get("force_close", True)
+        if not isinstance(force_close, bool):
+            raise ApiError("force_close 必须是布尔值")
         requested_count = body.get("request_count")
         units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 1000000000, True)
         if self.active or getattr(self, 'preparing', False):
@@ -387,6 +392,7 @@ class CloudBench:
             "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
             "ignore_eos": 1 if body.get("ignore_eos") else 0,
             "chat_template_kwargs": json.dumps(chat_template_kwargs, ensure_ascii=False) if chat_template_kwargs is not None else None,
+            "truncate_ratio": truncate_ratio, "force_close": int(force_close),
             "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,
             "dataset_id": dataset["id"], "dataset_name": dataset["name"], "mode": mode,
@@ -436,7 +442,7 @@ class CloudBench:
             else:
                 config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None,
                                      "endpoint_url": target.get('endpoint_url'), "protocol": target.get('protocol')},
-                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms", "ignore_eos")},
+                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms", "ignore_eos", "truncate_ratio", "force_close")},
                           "dataset": {"kind": dataset["kind"], "sha256": dataset.get("sha256"), "root": str(self.root)}, "price": price}
                 if "selected" in dataset:
                     config["dataset"]["selected"] = dataset["selected"]
