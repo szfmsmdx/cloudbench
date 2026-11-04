@@ -39,6 +39,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertNotIn('stream_options', body)
         self.assertEqual(json.dumps(item), before)
 
+    def test_ignore_eos_is_forwarded_only_for_openai(self):
+        item = {'messages': [{'role': 'user', 'content': 'hi'}]}
+        body = request_body({'model': 'mock', 'base_url': 'https://host/v1'}, {'max_tokens': 2048, 'ignore_eos': 1}, item)
+        self.assertTrue(body['ignore_eos'])
+        body = request_body({'model': 'mock', 'base_url': 'https://host/v1'}, {'max_tokens': 2048}, item)
+        self.assertNotIn('ignore_eos', body)
+        body = request_body({'model': 'mock', 'base_url': 'https://host/anthropic'}, {'max_tokens': 2048, 'ignore_eos': 1}, item)
+        self.assertNotIn('ignore_eos', body)
+
     def test_anthropic_cache_accounting_uses_total_logical_input(self):
         usage = usage_from({'input_tokens': 40, 'cache_read_input_tokens': 60, 'cache_creation_input_tokens': 10, 'output_tokens': 8})
         self.assertEqual((usage['prompt_tokens'], usage['cached_tokens'], usage['uncached_tokens'], usage['cache_write_tokens']), (110, 60, 40, 10))

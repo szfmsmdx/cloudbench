@@ -169,7 +169,7 @@ class CloudBench:
             "runs": {"dataset_id": "TEXT", "dataset_name": "TEXT", "mode": "TEXT", "request_rate": "REAL",
                      "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER",
                      "unit_count": "INTEGER", "min_input_tokens": "INTEGER", "request_timeout": "REAL",
-                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT"},
+                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER"},
             "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL",
                         "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT"},
         }
@@ -382,6 +382,7 @@ class CloudBench:
             "request_count": count, "concurrency": 1 if mode == "sync" else (
                 0 if concurrency is None or concurrency == "" else number(concurrency, "并发数", 1, 1000000000, True)),
             "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
+            "ignore_eos": 1 if body.get("ignore_eos") else 0,
             "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,
             "dataset_id": dataset["id"], "dataset_name": dataset["name"], "mode": mode,
@@ -431,7 +432,7 @@ class CloudBench:
             else:
                 config = {"target": {"base_url": target["base_url"], "model": target["model"], "api_key": key or None,
                                      "endpoint_url": target.get('endpoint_url'), "protocol": target.get('protocol')},
-                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms")},
+                          "run": {field: run[field] for field in ("mode", "request_rate", "concurrency", "request_count", "max_tokens", "seed", "max_input_tokens", "unit_count", "min_input_tokens", "request_timeout", "turn_delay_ms", "ignore_eos")},
                           "dataset": {"kind": dataset["kind"], "sha256": dataset.get("sha256"), "root": str(self.root)}, "price": price}
                 if "selected" in dataset:
                     config["dataset"]["selected"] = dataset["selected"]

@@ -94,6 +94,7 @@
             <div class="field-row async-fields" id="async-fields" hidden><label>目标 QPS <span class="hint">0 = 尽快全部发起</span><input name="request_rate" type="number" min="0" max="1000" step="any" value="5"></label><label>最大并发数 <span class="hint">留空不限制并发</span><input name="concurrency" type="number" min="1" max="1000000000" value="16" placeholder="默认 16；留空不限制"></label></div>
             <div class="traffic-note" id="traffic-note">同步模式会以并发 1 串行发送，不设置目标 QPS。</div>
             <label class="check-label usage-check"><input type="checkbox" name="include_usage" checked><span>请求流式 usage<small>若接口不支持 stream_options，请关闭</small></span></label>
+            <label class="check-label usage-check"><input type="checkbox" name="ignore_eos" checked><span>忽略 EOS（固定输出长度）<small>性能压测默认开启；生成到 max_tokens 为止</small></span></label>
             <div class="form-divider"><span>03</span><strong>硬件成本</strong><small>OPTIONAL</small></div>
             <div class="field-row three hardware-row"><label>GPU 数量 <span class="optional">可选</span><input name="gpu_count" type="number" min="1" max="128" placeholder="例如：8"></label><label>每卡每小时成本<input name="gpu_hour_price" type="number" min="0" step="any" placeholder="例如：12.5"></label><label>币种<input name="gpu_currency" maxlength="8" value="CNY"></label></div>
             <div class="form-footer"><span>真实请求可能产生费用；先用少量请求确认端点和数据集。</span><button class="primary" id="run-button" type="submit">运行测试 <span>→</span></button></div>

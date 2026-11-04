@@ -282,6 +282,7 @@ $('#run-form').addEventListener('submit', async event => {
     return;
   }
   data.include_usage = form.elements.include_usage.checked;
+  data.ignore_eos = form.elements.ignore_eos.checked;
   data.max_input_tokens = Number(data.context_limit_k) * 1024;
   delete data.context_limit_k;
   const button = form.querySelector('button[type="submit"]');
