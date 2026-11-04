@@ -4,6 +4,35 @@
 @media(max-width:1050px){.sidebar{width:197px}.main{max-width:calc(100% - 197px)}.view{padding:26px 24px 42px}.topbar{padding:0 24px}.hero-art{min-width:210px}.metric-grid{grid-template-columns:repeat(3,1fr)}.two-col{grid-template-columns:1fr}.target-list{display:grid;grid-template-columns:repeat(2,1fr);gap:0 20px}}
 @media(max-width:700px){.shell{display:block}.sidebar{width:100%;height:auto;position:static;padding:12px 15px}.brand{padding:0 2px 13px;font-size:19px}.brand small,.nav-label,.sidebar-bottom{display:none}.nav{flex-direction:row;overflow-x:auto;gap:4px}.nav-item{width:auto;white-space:nowrap;padding:0 10px;height:37px;font-size:12px}.nav-item.active:before{display:none}.nav-icon{font-size:14px;width:auto}.nav-count{display:none}.main{max-width:100%}.topbar{height:54px;padding:0 17px}.view{padding:19px 15px 32px}.hero{min-height:260px;padding:26px}.hero-art{display:none}.hero h1{font-size:33px}.stat-grid{gap:7px}.stat-card{padding:13px 11px;min-height:133px}.stat-card strong{font-size:23px}.stat-card small{font-size:10px}.overview-grid,.field-row,.field-row.three,.run-controls,.price-fields{grid-template-columns:1fr}.field-row{gap:15px}.form-footer{align-items:flex-start;flex-direction:column}.form-footer .primary{align-self:stretch}.target-list{display:block}.metric-grid{grid-template-columns:repeat(2,1fr);margin:17px}.result-heading{display:block}.result-actions{margin-top:15px}.footer{padding:0 15px 20px;display:block}.footer span{display:block}.page-heading h1{font-size:28px}.heading-symbol{font-size:40px}}
 
+/* Quality history */
+.quality-history-panel{margin-top:20px}
+.quality-history-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px 24px 24px}
+.quality-history-grid>.empty{grid-column:1/-1;margin:0}
+.quality-history-card{display:flex;flex-direction:column;gap:12px;width:100%;min-width:0;padding:20px;border:1px solid #dfe8e1;border-radius:11px;background:#fbfdfb;text-align:left;color:#45614f;transition:background .18s,border-color .18s,box-shadow .18s}
+.quality-history-card:hover{border-color:#9abf9a;background:#f5faf2;box-shadow:0 4px 16px #2548330a}
+.quality-history-card:focus-visible{outline:3px solid #b3d89a;outline-offset:3px}
+.quality-history-card.is-selected{border-color:#88b579;background:#f3f9ee;box-shadow:inset 0 0 0 1px #c7deb9}
+.quality-history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.quality-history-top>strong{font-size:14px;color:#284735;overflow-wrap:anywhere}
+.quality-history-top>.status{flex:none}
+.quality-history-model{font-size:11px;color:#7a8f80;overflow-wrap:anywhere;margin-top:-8px}
+.quality-history-tags{display:flex;flex-wrap:wrap;gap:5px}
+.quality-history-tags>span{padding:3px 7px;border:1px solid #e1e9df;border-radius:5px;background:#fff;font-size:10px;color:#6b8371}
+.quality-history-score{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:3px 0 1px}
+.quality-history-score strong{font:32px/1.2 'DM Mono',monospace;letter-spacing:-1.5px;color:#244b34}
+.quality-history-score em{font-size:15px;font-style:normal;color:#7a967f;letter-spacing:0;margin-left:3px}
+.quality-history-score small{display:block;font-size:11px;color:#85998b;margin-top:5px}
+.quality-history-count{text-align:right;font-size:11px;white-space:nowrap;color:#6a8372}
+.quality-history-count b{font:16px 'DM Mono',monospace;color:#45654d}
+.quality-history-progress{display:block;height:4px;border-radius:4px;background:#e5ede1;overflow:hidden}
+.quality-history-progress i{display:block;height:100%;background:#8bbf73;border-radius:4px}
+.quality-history-card[aria-pressed="false"] .quality-history-progress i{background:#a7c395}
+.quality-history-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:3px;font-size:10px;color:#8b9c90}
+.quality-history-bottom>span{color:#53805b;white-space:nowrap}
+#quality-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:1200px){.quality-history-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.quality-history-grid{grid-template-columns:1fr;padding:16px 17px 20px}.quality-history-card{padding:17px}#quality-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 /* Keep the optional/limit notes on the same caption line so adjacent controls align. */
 .form label:not(.check-label){position:relative;white-space:nowrap}
 .form label .optional,.form label .hint{position:absolute;top:0;right:0;line-height:1.55}

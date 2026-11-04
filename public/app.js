@@ -102,6 +102,10 @@ async function refresh() {
 function metric(label, value, unit, foot) {
   return `<div class="metric-card"><span>${label}</span><strong>${value}<em>${unit}</em></strong><small>${foot}</small></div>`;
 }
+function tokenAverage(samples, key) {
+  const values = samples.filter(row => row.status === 'ok' && Number.isFinite(row[key])).map(row => row[key]);
+  return { value: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, n: values.length };
+}
 function renderRun(data) {
   state.currentRun = data;
   const { run, samples, summary: s } = data;
@@ -117,10 +121,16 @@ function renderRun(data) {
   $('#export-summary').href = `/api/runs/${run.id}/summary.csv`;
   $('#export-samples').href = `/api/runs/${run.id}/samples.csv`;
   const currency = run.price_snapshot ? JSON.parse(run.price_snapshot).currency : '';
+  const inputAverage = tokenAverage(samples, 'prompt_tokens');
+  const outputAverage = tokenAverage(samples, 'completion_tokens');
   $('#result-metrics').innerHTML = [
     metric('TTFT · p50', fmt(s.ttft.p50), 'ms', `${s.ttft.n} 个有效样本`),
+    metric('TTFT · p99', fmt(s.ttft.p99), 'ms', `${s.ttft.n} 个有效样本`),
     metric('TPOT · p50', fmt(s.tpot.p50), 'ms', `${s.tpot.n} 个有效样本`),
+    metric('TPOT · p99', fmt(s.tpot.p99), 'ms', `${s.tpot.n} 个有效样本`),
     metric('E2E · p95', fmt(s.e2e.p95), 'ms', `${s.e2e.n} 个有效样本`),
+    metric('平均输入 token', fmt(inputAverage.value), 'tok', `${inputAverage.n} 个有输入用量的成功请求`),
+    metric('平均输出 token', fmt(outputAverage.value), 'tok', `${outputAverage.n} 个有输出用量的成功请求`),
     metric('输出吞吐', fmt(s.output_tps), 'tok/s', '测试窗口总吞吐'),
     metric('请求吞吐', fmt(s.request_tps), 'req/s', run.mode === 'async' ? (run.request_rate === 0 ? '突发模式' : `目标 ${run.request_rate} QPS`) : '同步串行'),
     metric('实际到达速率', fmt(s.actual_arrival_qps), 'QPS', run.request_rate === 0 ? '突发模式不计算' : '按请求发起时间计算'),
@@ -128,7 +138,7 @@ function renderRun(data) {
     metric('成功率', s.success_rate == null ? '—' : fmt(s.success_rate), '%', `${s.success} 成功 / ${s.failed} 失败`),
     metric('费用估算', s.estimated_cost == null ? '—' : fmt(s.estimated_cost, 6), currency, `${s.price_coverage} 个请求可计价`),
     metric('卡时成本', s.hardware_hourly_cost == null ? '—' : fmt(s.hardware_hourly_cost, 4), `${run.gpu_currency || ''}/h`, run.gpu_count ? `${run.gpu_count} 张 GPU` : '填写 GPU 数量和单价'),
-    metric('本次硬件成本', s.hardware_run_cost == null ? '—' : fmt(s.hardware_run_cost, 6), run.gpu_currency || '', s.hardware_per_1m_output == null ? '尚无输出 token 数据' : `每百万输出 token：${fmt(s.hardware_per_1m_output, 2)}`)
+    metric('本次硬件成本', s.hardware_run_cost == null ? '—' : fmt(s.hardware_run_cost, 6), run.gpu_currency || '', s.hardware_run_cost == null ? '填写 GPU 数量和单价' : s.hardware_per_1m_output == null ? '尚无输出 token 数据' : `每百万输出 token：${fmt(s.hardware_per_1m_output, 2)}`)
   ].join('');
   let note = 'TTFT 为客户端观测的首个有效输出片段；TPOT 需服务端返回输出 token 用量。';
   if (run.dataset_id?.startsWith('public:')) {

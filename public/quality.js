@@ -1,6 +1,31 @@
 let qualityCurrent = null;
 let qualityPoll = null;
 
+function qualityThinkingLabel(run) {
+  const kwargs = run.chat_template_kwargs || {};
+  if (kwargs.enable_thinking === false || kwargs.thinking === false || kwargs.reasoning_effort === 'none') return '思考关闭';
+  const effort = kwargs.reasoning_effort;
+  const label = ({50: 'low', 62: 'medium', 75: 'high', 100: 'max'})[effort] || effort || '默认';
+  return `思考 · ${label}`;
+}
+
+function renderQualityHistory(runs) {
+  $('#quality-history').innerHTML = runs.length ? runs.map(run => {
+    const s = run.summary;
+    const complete = run.status === 'completed' && s.completed === run.count;
+    const progress = Math.min(100, s.completed / Math.max(run.count, 1) * 100);
+    const selected = run.id === qualityCurrent;
+    return `<button type="button" class="quality-history-card${selected ? ' is-selected' : ''}" data-quality-run="${escapeHtml(run.id)}" aria-pressed="${selected}">
+      <span class="quality-history-top"><strong>${escapeHtml(run.target_name)}</strong>${statusHtml(run.status)}</span>
+      <span class="quality-history-model">${escapeHtml(run.model)}</span>
+      <span class="quality-history-tags"><span>GPQA-Diamond</span><span>${escapeHtml(qualityThinkingLabel(run))}</span><span>并发 ${fmt(run.concurrency ?? 1, 0)}</span></span>
+      <span class="quality-history-score"><span><strong>${fmt(s.accuracy, 2)}<em>%</em></strong><small>${complete ? '正确率' : '阶段正确率'}</small></span><span class="quality-history-count"><b>${fmt(s.correct, 0)}</b> 题答对<small>${fmt(s.completed, 0)} / ${fmt(run.count, 0)} 题已完成</small></span></span>
+      <span class="quality-history-progress" aria-hidden="true"><i style="width:${progress}%"></i></span>
+      <span class="quality-history-bottom"><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(dateTime(run.started_at))}</time><span>查看结果 <span aria-hidden="true">↗</span></span></span>
+    </button>`;
+  }).join('') : '<div class="empty">暂无跑分记录。每次评测运行全量 198 题。</div>';
+}
+
 function qualityEstimate() {
   const form = $('#quality-form');
   const count = 198;
@@ -16,7 +41,7 @@ window.refreshQuality = async function () {
   setSelectOptions($('#quality-price'), state.prices, '不估算费用（仍记录 token 用量）', p => `${p.provider} / ${p.model} · ${p.currency}`);
   const data = await api('/api/quality');
   $('#quality-ready').textContent = data.ready ? 'GPQA-Diamond 已准备；只把问题和选项发送给模型，标准答案留在本地判分。' : '数据未准备，请管理员运行 python -m pybench.gpqa。';
-  $('#quality-history').innerHTML = data.runs.length ? data.runs.map(r => `<button type="button" class="recent-item" data-quality-run="${escapeHtml(r.id)}"><span><strong>${escapeHtml(r.target_name)}</strong><small>${dateTime(r.started_at)} · ${r.count} 题 · ${r.summary.completed} 已完成 · ${fmt(r.summary.accuracy)}%</small></span>${statusHtml(r.status)}</button>`).join('') : '<div class="empty">暂无跑分记录。每次评测运行全量 198 题。</div>';
+  renderQualityHistory(data.runs);
   qualityEstimate();
   if (!qualityCurrent && data.runs.length) await loadQuality(data.runs[0].id);
 };
@@ -25,12 +50,15 @@ async function loadQuality(id) {
   clearTimeout(qualityPoll);
   const run = await api(`/api/quality/${id}`);
   qualityCurrent = id;
+  document.querySelectorAll('[data-quality-run]').forEach(card => {
+    const selected = card.dataset.qualityRun === id;
+    card.classList.toggle('is-selected', selected);
+    card.setAttribute('aria-pressed', String(selected));
+  });
   const s = run.summary;
   $('#quality-result').hidden = false;
   $('#quality-title').textContent = `${run.target_name} · GPQA-Diamond`;
-  const thinking = run.chat_template_kwargs && run.chat_template_kwargs.enable_thinking === false
-    ? '思考关闭'
-    : `思考 ${run.chat_template_kwargs && run.chat_template_kwargs.reasoning_effort != null ? run.chat_template_kwargs.reasoning_effort : 'default'}`;
+  const thinking = qualityThinkingLabel(run);
   $('#quality-progress').textContent = `${({running:'运行中',completed:'已完成',cancelled:'已停止',error:'中断'})[run.status]} · ${s.completed} / ${s.total} 题 · seed ${run.seed} · ${thinking} · 并发 ${run.concurrency ?? 1} · 每题上限 ${run.max_tokens} tokens`;
   $('#quality-cancel').hidden = run.status !== 'running';
   $('#quality-export').href = `/api/quality/${id}/export`;
