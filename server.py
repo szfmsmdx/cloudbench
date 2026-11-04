@@ -22,6 +22,8 @@ from pybench.connection import connect
 from pybench.datasets import eligible_count, length_distribution, token_counts
 from pybench.workloads import catalog, select_for_run, turn_count
 from pybench.results import TIMELINE_COLUMNS, csv_bytes, export_csv, summarize, utc_now
+from pybench.quality import Quality
+from pybench.secrets import CredentialStore
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA = """
@@ -178,13 +180,21 @@ class CloudBench:
                     self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self.db.execute("UPDATE runs SET status='error',finished_at=?,error=? WHERE status='running'",
                         (utc_now(), "后台进程已重启，此测试已中断"))
-        self.credentials: dict[str, str] = {}
+        key_path = Path(os.environ.get('CLOUDBENCH_MASTER_KEY_FILE', data_dir / 'secrets' / 'master.key')).absolute()
+        self.credential_store = CredentialStore(self.db, key_path)
+        self.credentials: dict[str, str] = self.credential_store.loaded
         self.active: dict[str, ActiveRun] = {}
+        self.quality = Quality(self)
         self.app = web.Application(middlewares=[errors], client_max_size=1_000_000)
         self.app.add_routes([
             web.get("/api/state", self.state), web.post("/api/targets", self.create_target),
+            web.get('/api/quality', self.quality.list_runs), web.post('/api/quality', self.quality.create),
+            web.get('/api/quality/{id}', self.quality.get),
+            web.get('/api/quality/{id}/export', self.quality.export),
+            web.post('/api/quality/{id}/cancel', self.quality.cancel),
             web.post("/api/targets/{id}/connect", self.reconnect_target),
             web.post("/api/targets/{id}/key", self.set_key), web.delete("/api/targets/{id}", self.delete_target),
+            web.delete('/api/targets/{id}/key', self.clear_key),
             web.post("/api/prices", self.create_price), web.post("/api/runs", self.create_run),
             web.get("/api/runs/{id}", self.get_run), web.post("/api/runs/{id}/cancel", self.cancel_run),
             web.get("/api/runs/{id}/{kind:summary|samples|timeline}.csv", self.download_csv),
@@ -246,6 +256,7 @@ class CloudBench:
                   **{k: result[k] for k in ('protocol', 'endpoint_url', 'checked_at')}}
         self.insert("targets", target)
         if key:
+            self.credential_store.save(target['id'], key)
             self.credentials[target["id"]] = key
         return json_response({**target, "has_key": bool(key), "status": "connected"}, 201)
 
@@ -271,12 +282,23 @@ class CloudBench:
         if not self.one("SELECT id FROM targets WHERE id=?", (target_id,)):
             raise ApiError("目标不存在", 404)
         body = await body_json(request)
-        self.credentials[target_id] = required_string(body.get("api_key"), "API Key", 4000)
+        key = required_string(body.get("api_key"), "API Key", 4000)
+        self.credential_store.save(target_id, key)
+        self.credentials[target_id] = key
         return json_response({"ok": True})
+
+    async def clear_key(self, request: web.Request) -> web.Response:
+        target_id = request.match_info['id']
+        if not self.one('SELECT id FROM targets WHERE id=?', (target_id,)):
+            raise ApiError('目标不存在', 404)
+        self.credential_store.delete(target_id)
+        self.credentials.pop(target_id, None)
+        return json_response({'ok': True})
 
     async def delete_target(self, request: web.Request) -> web.Response:
         target_id = request.match_info["id"]
         self.db.execute("DELETE FROM targets WHERE id=?", (target_id,))
+        self.credential_store.delete(target_id)
         self.credentials.pop(target_id, None)
         return json_response({"ok": True})
 
@@ -298,7 +320,7 @@ class CloudBench:
         return json_response(price, 201)
 
     async def create_run(self, request: web.Request) -> web.Response:
-        if self.active or getattr(self, 'preparing', False):
+        if self.active or self.quality.tasks or getattr(self, 'preparing', False):
             raise ApiError("已有测试正在运行，请等待或取消", 409)
         body = await body_json(request)
         target = self.one("SELECT * FROM targets WHERE id=?", (body.get("target_id"),))
@@ -492,6 +514,7 @@ class CloudBench:
                             headers={"Content-Disposition": f'attachment; filename="cloudbench-{run_id}-{kind}.csv"', "Cache-Control": "no-store"})
 
     async def close(self, app: web.Application) -> None:
+        await self.quality.close()
         active_runs = list(self.active.values())
         for active in active_runs:
             self.stop(active)

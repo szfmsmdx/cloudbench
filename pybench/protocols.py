@@ -34,6 +34,8 @@ def request_body(target, run, item):
     if target_protocol(target) == 'openai':
         if item.get('tools'):
             body['tools'] = item['tools']
+        if run.get('chat_template_kwargs'):
+            body['chat_template_kwargs'] = run['chat_template_kwargs']
         if run.get('include_usage', True):
             body['stream_options'] = {'include_usage': True}
         return body

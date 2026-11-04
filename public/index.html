@@ -7,8 +7,9 @@
   <title>CloudBench · 模型性能与成本基准测试</title>
   <meta name="description" content="在本地测试模型 API 的延迟、吞吐、缓存和 token 成本。">
   <link rel="stylesheet" href="/styles.css">
-  <script src="/charts.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="/charts.js?v=20261104" defer></script>
+  <script src="/app.js?v=20261104" defer></script>
+  <script src="/quality.js?v=20261104" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -18,6 +19,7 @@
       <nav class="nav" aria-label="主导航">
         <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span> 概览 <span class="nav-count" id="nav-run-count">0</span></button>
         <button class="nav-item" data-view="targets"><span class="nav-icon">⌘</span> 模型端点</button>
+        <button class="nav-item" data-view="quality"><span class="nav-icon">✓</span> 正确性跑分</button>
         <button class="nav-item" data-view="prices"><span class="nav-icon">◈</span> 价格目录</button>
         <button class="nav-item" data-view="history"><span class="nav-icon">▤</span> 测试记录</button>
       </nav>
@@ -37,6 +39,35 @@
         <div class="overview-grid"><div class="panel quickstart"><div class="panel-heading"><span class="overline">GET STARTED</span><h3>从这里开始</h3><p>三步完成一次可复现的基准测试。</p></div><div class="steps"><div class="step"><span>01</span><div><strong>添加模型端点</strong><small>粘贴服务地址，自动连接并获取模型</small></div><button data-view="targets" aria-label="前往模型端点">↗</button></div><div class="step"><span>02</span><div><strong>录入价格</strong><small>保存官方报价或你的自定义费率</small></div><button data-view="prices" aria-label="前往价格目录">↗</button></div><div class="step"><span>03</span><div><strong>运行并导出</strong><small>查看逐请求样本和汇总 CSV</small></div><button data-view="targets" aria-label="开始测试">↗</button></div></div></div><div class="panel recent-panel"><div class="panel-heading"><span class="overline">RECENT ACTIVITY</span><h3>最近测试</h3></div><div id="overview-recent" class="recent-list"></div></div></div>
       </section>
 
+      <section class="view" id="view-quality">
+        <div class="page-heading"><div><span class="overline">QUALITY EVALUATION</span><h1>正确性跑分</h1><p>用 GPQA-Diamond 检查科学知识与推理能力，程序自动核对答案，无需裁判 API。</p></div></div>
+        <div class="panel form-panel"><div class="panel-heading"><h3>GPQA-Diamond · 198 道四选一</h3><p>固定运行全量 198 题，每题独立请求一次，按固定种子打乱题目与选项顺序。</p></div>
+          <form id="quality-form" class="form">
+            <div class="field-row three"><label>模型端点<select name="target_id" id="quality-target" required><option value="">请选择端点</option></select></label>
+            <label>测试集<input value="GPQA-Diamond · 全量 198 题" readonly></label>
+            <label>输出上限 / 每题 tokens<input name="max_tokens" type="number" value="32768" min="128" max="65536" required></label></div>
+            <div class="field-row three">
+              <label>并发数<input name="concurrency" type="number" value="16" min="1" max="64" required></label>
+              <label>思考模式<select name="thinking_mode"><option value="thinking">开启（thinking）</option><option value="chat">关闭（chat）</option></select></label>
+              <label>推理强度<select name="reasoning_effort"><option value="50">low（50）</option><option value="62">medium（62）</option><option value="75" selected>high（75）</option><option value="100">max（100）</option></select></label>
+            </div>
+            <p class="field-note">输出预算包含服务端计入上限的推理 token；预算不足会截断答案并计为未答对。思考关闭时使用 enable_thinking=false；开启时按所选强度透传 reasoning_effort。结果不宣称复现官方榜单。</p>
+            <details><summary>费用与高级设置</summary><div class="advanced-fields">
+            <label>价格版本<select name="price_id" id="quality-price"><option value="">不估算费用（仍记录 token 用量）</option></select></label>
+            <label>随机种子<input name="seed" type="number" value="42" min="0" max="4294967295" required></label>
+            <label>单题超时 / 秒<input name="timeout" type="number" value="900" min="10" max="3600" required></label></div></details>
+            <p id="quality-estimate" class="field-note"></p><p id="quality-ready" class="field-note"></p>
+            <div class="form-footer"><span>按设定并发作答，不自动重试。停止后不再发送下一题，已提交的请求仍可能计费。</span><button class="primary" type="submit">开始跑分 →</button></div>
+          </form>
+        </div>
+        <div id="quality-result" class="panel result-panel" hidden>
+          <div class="panel-heading result-heading"><div><h3 id="quality-title"></h3><p id="quality-progress"></p></div><div class="result-actions"><button id="quality-cancel" class="ghost">停止评测</button><a id="quality-export" class="secondary">导出完整结果 JSON ↓</a></div></div>
+          <div id="quality-metrics" class="metric-grid"></div><p id="quality-note" class="result-note"></p>
+          <div class="table-wrap"><table><thead><tr><th>题号</th><th>结果</th><th>模型答案</th><th>标准答案</th><th>输出 tokens</th><th>详情</th></tr></thead><tbody id="quality-samples"></tbody></table></div>
+        </div>
+        <div class="panel"><div class="panel-heading"><h3>跑分记录</h3></div><div id="quality-history" class="recent-list"></div></div>
+      </section>
+
       <section class="view" id="view-targets">
         <div class="page-heading"><div><span class="overline">ENDPOINTS & RUNS</span><h1>模型端点</h1><p>连接本地端口或云端 API，然后发送真实的流式请求。</p></div><span class="heading-symbol">⌘</span></div>
         <div class="two-col"><div class="panel form-panel"><div class="panel-heading"><span class="overline">01 / CONNECTION</span><h3>添加端点</h3><p>粘贴地址即可连接，自动识别接口并获取可用模型。</p></div><form id="target-form" class="form">
@@ -44,7 +75,7 @@
           <label>API Key <span class="optional">可选</span><input name="api_key" type="password" autocomplete="off" placeholder="服务不需要密钥时留空"></label>
           <div id="target-model-fields" hidden><label>选择模型<select id="target-model-select"><option value="">请选择模型</option></select></label><label>或填写模型名称<input name="model" placeholder="服务未列出模型时手动填写"></label></div>
           <details id="target-advanced"><summary>高级设置</summary><div class="advanced-fields"><label>显示名称 <span class="optional">可选</span><input name="name" maxlength="100" placeholder="默认使用模型名称"></label><label>自定义接口格式<select name="protocol"><option value="">自动识别</option><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label><p class="field-note">仅在自动连接失败时使用。手动指定格式后，服务地址须填写完整接口 URL，并原样请求。</p></div></details>
-          <p class="field-note">连接时会发送少量短请求，不计入压测结果。API Key 仅保存在当前服务内存中。</p>
+          <p class="field-note">连接时会发送少量短请求，不计入压测结果。API Key 加密保存，测速与跑分共用，服务重启后自动恢复。</p>
           <p id="target-connection-status" class="field-note" role="status" aria-live="polite"></p>
           <button class="primary" type="submit">连接并识别 <span>↗</span></button>
         </form></div><div class="panel targets-panel"><div class="panel-heading"><span class="overline">SAVED CONNECTIONS</span><h3>已保存端点 <span class="title-count" id="target-count">0</span></h3></div><div id="target-list" class="target-list"></div></div></div>
@@ -60,7 +91,7 @@
             <div class="field-row three"><label>最短输入 / 参考tokens<input name="min_input_tokens" type="number" min="0" value="0"></label><label>单请求超时 / 秒<input name="request_timeout" type="number" min="1" max="7200" value="900"></label><label>Agent轮间等待 / ms<input name="turn_delay_ms" type="number" min="0" max="60000" value="0"></label></div>
             <div class="form-divider"><span>02</span><strong>发压方式</strong><small>TRAFFIC</small></div>
             <div class="mode-switch" role="radiogroup" aria-label="发压方式"><label class="mode-choice"><input type="radio" name="mode" value="sync" checked><span><strong>同步串行</strong><small>每个请求完成后再发送下一个</small></span></label><label class="mode-choice"><input type="radio" name="mode" value="async"><span><strong>异步按 QPS</strong><small>指定到达速率与最大在途请求数</small></span></label></div>
-            <div class="field-row async-fields" id="async-fields" hidden><label>目标 QPS <span class="hint">0 = 尽快全部发起</span><input name="request_rate" type="number" min="0" max="1000" step="any" value="5"></label><label>最大并发数 <span class="hint">留空不限制并发</span><input name="concurrency" type="number" min="1" max="1000000000" placeholder="留空不限制；例如 16"></label></div>
+            <div class="field-row async-fields" id="async-fields" hidden><label>目标 QPS <span class="hint">0 = 尽快全部发起</span><input name="request_rate" type="number" min="0" max="1000" step="any" value="5"></label><label>最大并发数 <span class="hint">留空不限制并发</span><input name="concurrency" type="number" min="1" max="1000000000" value="16" placeholder="默认 16；留空不限制"></label></div>
             <div class="traffic-note" id="traffic-note">同步模式会以并发 1 串行发送，不设置目标 QPS。</div>
             <label class="check-label usage-check"><input type="checkbox" name="include_usage" checked><span>请求流式 usage<small>若接口不支持 stream_options，请关闭</small></span></label>
             <div class="form-divider"><span>03</span><strong>硬件成本</strong><small>OPTIONAL</small></div>

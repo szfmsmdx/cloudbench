@@ -83,7 +83,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         page = await response.text()
         self.assertIn("模型端点", page)
         self.assertIn('name="context_limit_k"', page)
-        self.assertNotIn('name="seed"', page)
+        performance_form = page.split('<form id="run-form"', 1)[1].split('</form>', 1)[0]
+        self.assertNotIn('name="seed"', performance_form)
         self.assertNotIn("dataset-import", page)
         state = await (await self.client.get("/api/state")).json()
         local = [d for d in state["datasets"] if d["kind"].startswith("local-")]
@@ -171,7 +172,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(persisted["samples"], result["samples"])
         self.assertEqual(persisted["summary"]["estimated_cost"], .000208)
         state = await (await self.client.get("/api/state")).json()
-        self.assertFalse(state["targets"][0]["has_key"])
+        self.assertTrue(state["targets"][0]["has_key"])
 
     async def test_blank_count_defaults_to_all_eligible_samples(self):
         datasets = [d for d in (await (await self.client.get("/api/state")).json())["datasets"] if d["kind"].startswith("local-")]

@@ -14,16 +14,23 @@ function toast(message, error = false) {
 }
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers } });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  const text = await response.text();
+  let result = null;
+  if (text) {
+    try { result = JSON.parse(text); }
+    catch { throw new Error(`HTTP ${response.status}：响应不是 JSON`); }
+  }
+  if (!response.ok) throw new Error((result && result.error) || `HTTP ${response.status}${text ? '' : '（空响应）'}`);
+  if (result === null) throw new Error(`HTTP ${response.status}：空响应`);
   return result;
 }
 function view(name) {
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `view-${name}`));
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === name));
-  $('#view-name').textContent = ({ overview: '概览', targets: '模型端点', prices: '价格目录', history: '测试记录' })[name];
+  $('#view-name').textContent = ({ overview: '概览', targets: '模型端点', quality: '正确性跑分', prices: '价格目录', history: '测试记录' })[name];
   location.hash = name;
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (name === 'quality' && window.refreshQuality) window.refreshQuality().catch(e => toast(e.message, true));
 }
 function setSelectOptions(select, items, placeholder, label) {
   const old = select.value;
@@ -86,6 +93,7 @@ async function refresh() {
   const data = await api('/api/state');
   Object.assign(state, data);
   renderState();
+  if (window.refreshQuality && $('#view-quality').classList.contains('active')) window.refreshQuality().catch(e => toast(e.message, true));
   clearTimeout(state.preparationPoll);
   if (state.datasets.some(d => d.preparation && !['complete', 'error'].includes(d.preparation.status))) {
     state.preparationPoll = setTimeout(() => refresh().catch(e => toast(e.message, true)), 10000);
@@ -182,7 +190,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if (action.dataset.action === 'set-key') {
-    const key = prompt('输入此端点的 API Key（只保存在当前服务进程内存中）');
+    const key = prompt('输入此端点的 API Key（加密保存，测速与跑分共用，重启后自动恢复）');
     if (!key) return;
     try { await api(`/api/targets/${id}/key`, { method: 'POST', body: JSON.stringify({ api_key: key }) }); await refresh(); toast('API Key 已设置'); } catch (e) { toast(e.message, true); }
   }
@@ -297,7 +305,7 @@ $('#price-date').value = new Date().toISOString().slice(0, 10);
 renderMode();
 refresh().then(() => {
   const requested = location.hash.slice(1);
-  if (['overview', 'targets', 'prices', 'history'].includes(requested)) view(requested);
+  if (['overview', 'targets', 'quality', 'prices', 'history'].includes(requested)) view(requested);
   const running = state.runs.find(r => r.status === 'running');
   if (running) loadRun(running.id, false).catch(e => toast(e.message, true));
 }).catch(e => toast(e.message, true));
