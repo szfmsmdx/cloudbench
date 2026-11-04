@@ -16,7 +16,9 @@ INDEX_FILES = {
     "local-longbench-v2-trunc": "longbench-v2-token-counts.json",
 }
 TRUNCATE_KINDS = {"local-longbench-v2-trunc": "local-longbench-v2"}
-TRUNCATE_RATIO = 0.96
+# K3 token counts run ~9% below the deployed DeepSeek tokenizer on the same text.
+# Keep headroom so truncated prompts still fit the target model's 1M window.
+TRUNCATE_RATIO = 0.89
 LENGTH_BOUNDS = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 LENGTH_LABELS = ["<1K", "1K–2K", "2K–4K", "4K–8K", "8K–16K", "16K–32K", "32K–64K", "64K–128K", "128K–256K", "256K–512K", "512K–1M", "≥1M"]
 
@@ -108,7 +110,7 @@ def load_local_items(kind: str, root: Path, context_limit: int, output_limit: in
                 if not truncate and counts[index] > prompt_limit:
                     continue
                 context = row.get('context') or ''
-                if truncate and counts[index] > prompt_limit:
+                if truncate and counts[index] > prompt_limit * TRUNCATE_RATIO:
                     context = truncate_context(context, counts[index], prompt_limit)
                 choices = "\n".join(f"{letter}. {row.get(f'choice_{letter}', '')}" for letter in "ABCD")
                 text = f"{context}\n\n{row.get('question') or ''}\n{choices}\n请从 A、B、C、D 中选择正确答案。"
