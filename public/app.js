@@ -72,10 +72,11 @@ function statusHtml(status) {
   return `<span class="status ${escapeHtml(status)}">${label}</span>`;
 }
 function renderState() {
+  const visibleRuns = state.runs.filter(run => Number(run.request_count) !== 1 || run.status === 'running');
   $('#stat-targets').textContent = state.targets.length;
-  $('#stat-runs').textContent = state.runs.length;
+  $('#stat-runs').textContent = visibleRuns.length;
   $('#stat-prices').textContent = state.prices.length;
-  $('#nav-run-count').textContent = state.runs.length;
+  $('#nav-run-count').textContent = visibleRuns.length;
   $('#target-count').textContent = state.targets.length;
   $('#price-count').textContent = state.prices.length;
   setSelectOptions($('#run-target'), state.targets, state.targets.length ? '请选择端点' : '请先添加端点', t => `${t.name} · ${t.model}`);
@@ -86,8 +87,8 @@ function renderState() {
   renderDatasetInfo();
   $('#target-list').innerHTML = state.targets.length ? state.targets.map(t => `<div class="target-item"><div class="target-item-top"><strong>${escapeHtml(t.name)}</strong><span class="status ${t.has_key ? '' : 'running'}">${t.has_key ? '已设密钥' : '无密钥'}</span></div><code>${escapeHtml(t.base_url)}</code><small>${escapeHtml(t.model)} · ${t.checked_at ? "已验证连接" : "待验证连接"}</small>${t.endpoint_url ? `<small>请求地址：${escapeHtml(t.endpoint_url)}</small>` : ""}<div class="target-actions"><button type="button" class="mini-button" data-action="connect-target" data-id="${escapeHtml(t.id)}">重新连接</button><button type="button" class="mini-button" data-action="select-target" data-id="${escapeHtml(t.id)}">用此端点测试</button><button type="button" class="mini-button" data-action="set-key" data-id="${escapeHtml(t.id)}">设置密钥</button><button type="button" class="mini-button danger" data-action="delete-target" data-id="${escapeHtml(t.id)}">删除</button></div></div>`).join('') : '<div class="empty">尚无端点。填写左侧信息，即可开始连接。</div>';
   $('#price-rows').innerHTML = state.prices.length ? state.prices.map(p => `<tr><td><strong>${escapeHtml(p.provider)}</strong><small>${escapeHtml(p.model)}</small></td><td>${fmt(p.input_price, 6)}</td><td>${fmt(p.cache_read_price, 6)}</td><td>${fmt(p.cache_write_price, 6)}</td><td>${fmt(p.output_price, 6)}</td><td>${escapeHtml(p.currency)}</td><td>${escapeHtml(p.checked_at)}</td><td>${p.source_url ? `<a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">查看 ↗</a>` : '—'}</td></tr>`).join('') : '<tr><td colspan="8"><div class="empty">暂无价格。录入后可在创建测试时选择。</div></td></tr>';
-  $('#overview-recent').innerHTML = state.runs.length ? state.runs.slice(0, 4).map(r => `<a href="#history" class="recent-item" data-run="${escapeHtml(r.id)}"><div><strong>${escapeHtml(r.target_name)}</strong><small>${escapeHtml(r.model)} · ${dateTime(r.started_at)}</small></div>${statusHtml(r.status)}</a>`).join('') : '<div class="empty">第一次测试的结果会出现在这里。</div>';
-  $('#history-rows').innerHTML = state.runs.length ? state.runs.map(r => `<tr><td>${dateTime(r.started_at)}</td><td><strong>${escapeHtml(r.target_name)}</strong></td><td>${escapeHtml(r.model)}</td><td>${r.request_count}</td><td>${statusHtml(r.status)}</td><td><button type="button" class="mini-button" data-run="${escapeHtml(r.id)}">查看结果 →</button></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty">暂无运行记录。</div></td></tr>';
+  $('#overview-recent').innerHTML = visibleRuns.length ? visibleRuns.slice(0, 4).map(r => `<a href="#history" class="recent-item" data-run="${escapeHtml(r.id)}"><div><strong>${escapeHtml(r.target_name)}</strong><small>${escapeHtml(r.model)} · ${dateTime(r.started_at)}</small></div>${statusHtml(r.status)}</a>`).join('') : '<div class="empty">第一次测试的结果会出现在这里。</div>';
+  $('#history-rows').innerHTML = visibleRuns.length ? visibleRuns.map(r => `<tr><td>${dateTime(r.started_at)}</td><td><strong>${escapeHtml(r.target_name)}</strong></td><td>${escapeHtml(r.model)}</td><td>${r.request_count}</td><td>${statusHtml(r.status)}</td><td><button type="button" class="mini-button" data-run="${escapeHtml(r.id)}">查看结果 →</button></td></tr>`).join('') : '<tr><td colspan="6"><div class="empty">暂无运行记录。</div></td></tr>';
 }
 async function refresh() {
   const data = await api('/api/state');
