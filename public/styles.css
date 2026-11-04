@@ -79,8 +79,10 @@
 .mode-choice small{font-weight:400;font-size:11px;color:#8da193}
 .traffic-note{padding:10px 12px;background:#f5f8f4;border-left:3px solid #a8c99a;border-radius:4px;color:#748777;font-size:11px}
 .usage-check{align-self:flex-start;min-width:255px}
+.output-options{grid-template-columns:repeat(2,minmax(0,1fr))}
+.output-options .usage-check{min-width:0;align-self:stretch}
 .form .check-label input{width:15px;height:15px;min-height:auto;padding:0;margin:0;flex:none}
-@media(max-width:700px){.mode-switch{grid-template-columns:1fr}.usage-check{align-self:stretch}}
+@media(max-width:700px){.mode-switch,.output-options{grid-template-columns:1fr}.usage-check{align-self:stretch}}
 
 /* Persisted, one-second benchmark charts */
 .timeline-section{margin:22px 24px 20px}
