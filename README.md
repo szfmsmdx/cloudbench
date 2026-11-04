@@ -62,7 +62,7 @@ python -m pybench.gpqa
 
 - **LongBench**：本地官方原始集，4,750 条；不使用 LongBench-E。
 - **LongBench v2**：本地官方原始集，503 条；按所填模型上下文上限过滤超长样本。
-- **LongBench v2（超限截断）**：同样 503 条；超过上下文上限的样本只截断 `context`，问题与选项保留。按 K3 索引预留约 11% tokenizer 差异余量，避免 DeepSeek 分词后超出 1M；结果会记录独立的 `dataset_id`。
+- **LongBench v2（超限截断）**：同样 503 条；超过上下文上限的样本只截断 `context`，问题与选项保留。按 K3 索引预留约 16% tokenizer 差异余量，避免 DeepSeek 分词后超出 1M；结果会记录独立的 `dataset_id`。
 
 另有四套公开负载，准备后可在网页直接选择：
 

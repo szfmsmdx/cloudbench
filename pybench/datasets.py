@@ -16,9 +16,9 @@ INDEX_FILES = {
     "local-longbench-v2-trunc": "longbench-v2-token-counts.json",
 }
 TRUNCATE_KINDS = {"local-longbench-v2-trunc": "local-longbench-v2"}
-# K3 token counts run ~9% below the deployed DeepSeek tokenizer on the same text.
-# Keep headroom so truncated prompts still fit the target model's 1M window.
-TRUNCATE_RATIO = 0.89
+# K3 token counts can run ~13% below the deployed DeepSeek tokenizer on the same
+# text. Keep 16% headroom so truncated prompts still fit the target model's 1M window.
+TRUNCATE_RATIO = 0.84
 LENGTH_BOUNDS = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 LENGTH_LABELS = ["<1K", "1K–2K", "2K–4K", "4K–8K", "8K–16K", "16K–32K", "32K–64K", "64K–128K", "128K–256K", "256K–512K", "512K–1M", "≥1M"]
 

@@ -297,7 +297,9 @@ async def run(config: dict[str, Any]) -> None:
     rng.shuffle(order)
     timeout = aiohttp.ClientTimeout(total=run_config.get("request_timeout", 120))
     # aiohttp limit=0 disables its own connection cap as well as our scheduler's.
-    connector = aiohttp.TCPConnector(limit=run_config["concurrency"])
+    # Uvicorn closes idle keep-alive connections after 5s; reusing one produces
+    # spurious "Server disconnected" errors during long benchmark runs.
+    connector = aiohttp.TCPConnector(limit=run_config["concurrency"], force_close=True)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         loop = asyncio.get_running_loop()
         run_start = loop.time()
