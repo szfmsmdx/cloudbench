@@ -10,7 +10,13 @@ from typing import Any
 import ijson
 
 
-INDEX_FILES = {"local-longbench": "longbench-token-counts.json", "local-longbench-v2": "longbench-v2-token-counts.json"}
+INDEX_FILES = {
+    "local-longbench": "longbench-token-counts.json",
+    "local-longbench-v2": "longbench-v2-token-counts.json",
+    "local-longbench-v2-trunc": "longbench-v2-token-counts.json",
+}
+TRUNCATE_KINDS = {"local-longbench-v2-trunc": "local-longbench-v2"}
+TRUNCATE_RATIO = 0.96
 LENGTH_BOUNDS = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 LENGTH_LABELS = ["<1K", "1K–2K", "2K–4K", "4K–8K", "8K–16K", "16K–32K", "32K–64K", "64K–128K", "128K–256K", "256K–512K", "512K–1M", "≥1M"]
 
@@ -39,15 +45,27 @@ def prompt_budget(context_limit: int, output_limit: int) -> int:
 
 def eligible_count(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0) -> int:
     limit = prompt_budget(context_limit, output_limit)
-    count = sum(minimum <= length <= limit for length in token_counts(kind, root))
+    counts = token_counts(kind, root)
+    if kind in TRUNCATE_KINDS:
+        return len(counts)
+    count = sum(minimum <= length <= limit for length in counts)
     if count == 0:
         raise ValueError("当前上下文上限下没有可用样本")
     return count
 
 
+def truncate_context(context: str, count: int, prompt_limit: int) -> str:
+    """Keep a proportional head of the context; questions and choices stay intact."""
+    target = max(1, int(prompt_limit * TRUNCATE_RATIO))
+    keep = max(1, int(len(context) * target / max(1, count)))
+    return context[:keep]
+
+
 def load_local_items(kind: str, root: Path, context_limit: int, output_limit: int, minimum: int = 0) -> list[dict[str, Any]]:
     # The tokenizer counts omit the chat template. Keep a small reserve for it.
     prompt_limit = prompt_budget(context_limit, output_limit)
+    truncate = kind in TRUNCATE_KINDS
+    kind = TRUNCATE_KINDS.get(kind, kind)
 
     items: list[dict[str, Any]] = []
     if kind == "local-longbench":
@@ -85,10 +103,15 @@ def load_local_items(kind: str, root: Path, context_limit: int, output_limit: in
                 row_count += 1
                 if index >= len(counts):
                     raise ValueError("LongBench v2 token 索引与原始文件不匹配")
-                if not minimum <= counts[index] <= prompt_limit:
+                if counts[index] < minimum:
                     continue
+                if not truncate and counts[index] > prompt_limit:
+                    continue
+                context = row.get('context') or ''
+                if truncate and counts[index] > prompt_limit:
+                    context = truncate_context(context, counts[index], prompt_limit)
                 choices = "\n".join(f"{letter}. {row.get(f'choice_{letter}', '')}" for letter in "ABCD")
-                text = f"{row.get('context') or ''}\n\n{row.get('question') or ''}\n{choices}\n请从 A、B、C、D 中选择正确答案。"
+                text = f"{context}\n\n{row.get('question') or ''}\n{choices}\n请从 A、B、C、D 中选择正确答案。"
                 items.append({"index": index, "messages": [{"role": "user", "content": text}]})
         if row_count != len(counts):
             raise ValueError("LongBench v2 token 索引与原始文件不匹配")

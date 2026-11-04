@@ -175,7 +175,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(state["targets"][0]["has_key"])
 
     async def test_blank_count_defaults_to_all_eligible_samples(self):
-        datasets = [d for d in (await (await self.client.get("/api/state")).json())["datasets"] if d["kind"].startswith("local-")]
+        datasets = [d for d in (await (await self.client.get("/api/state")).json())["datasets"]
+                    if d["kind"] in ("local-longbench", "local-longbench-v2")]
         if len(datasets) != 2:
             self.skipTest("全量条数测试需要本地离线索引")
         for dataset, index_file, blank in ((datasets[0], "longbench-token-counts.json", {}),

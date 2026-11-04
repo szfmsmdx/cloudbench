@@ -176,6 +176,23 @@ class LocalDatasetTests(unittest.TestCase):
             self.assertEqual([item["index"] for item in items], [0])
             self.assertIn("A. yes", items[0]["messages"][0]["content"])
 
+    def test_v2_trunc_variant_keeps_oversized_prompts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            directory = root / "datasets/raw/longbench-v2"
+            directory.mkdir(parents=True)
+            rows = [{"context": "source", "question": "Q?", "choice_A": "yes"},
+                    {"context": "x" * 200, "question": "Q2?", "choice_A": "no"}]
+            (directory / "data.json").write_text(json.dumps(rows), encoding="utf-8")
+            (root / "datasets/longbench-v2-token-counts.json").write_text(json.dumps({"counts": [100, 2000]}), encoding="utf-8")
+            items = load_local_items("local-longbench-v2-trunc", root, 2048, 128)
+            self.assertEqual(eligible_count("local-longbench-v2-trunc", root, 2048, 128), 2)
+            self.assertEqual([item["index"] for item in items], [0, 1])
+            content = items[1]["messages"][0]["content"]
+            self.assertIn("Q2?", content)
+            self.assertIn("A. no", content)
+            self.assertLess(content.count("x"), 200)
+
 
 class TelemetryTests(unittest.TestCase):
     def test_rates_use_window_duration_and_usage_is_not_double_counted(self):

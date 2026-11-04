@@ -222,6 +222,8 @@ class CloudBench:
              "官方原始集，4,750 条；1K–64K token，排除 LongBench-E。", "raw/longbench/extracted/data/multi_news.jsonl", "longbench-token-counts.json"),
             ("local:longbench-v2", "LongBench v2", "local-longbench-v2", 503, "zai-org/LongBench-v2",
              "官方原始集，503 条；约 10K–4M token，按上下文上限筛选。", "raw/longbench-v2/data.json", "longbench-v2-token-counts.json"),
+            ("local:longbench-v2-trunc", "LongBench v2（超限截断）", "local-longbench-v2-trunc", 503, "zai-org/LongBench-v2",
+             "官方 503 条全量；超过上下文上限的样本只截断 context，保留问题与选项。", "raw/longbench-v2/data.json", "longbench-v2-token-counts.json"),
         ]
         directory = self.root / "datasets"
         return [{"id": key, "name": name, "kind": kind, "item_count": count, "source": source, "description": description,
