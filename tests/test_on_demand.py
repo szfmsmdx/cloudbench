@@ -109,6 +109,38 @@ class OnDemandTests(unittest.TestCase):
 class OnDemandWorkerTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = test_workloads.PublicWorkloadAPITests.asyncSetUp
     asyncTearDown = test_workloads.PublicWorkloadAPITests.asyncTearDown
+
+    async def test_performance_thinking_options_reach_worker_and_survive_restart(self):
+        from aiohttp.test_utils import TestClient, TestServer
+        from server import create_app
+
+        config = {'target_id': self.target['id'], 'dataset_id': 'public:open-swe',
+                  'mode': 'sync', 'request_count': 1, 'max_tokens': 128,
+                  'ignore_eos': True, 'chat_template_kwargs': {'enable_thinking': False}}
+        for invalid in (False, [], 'chat'):
+            response = await self.client.post('/api/runs', json={**config, 'chat_template_kwargs': invalid})
+            self.assertEqual(response.status, 400, await response.text())
+        response = await self.client.post('/api/runs', json=config)
+        self.assertEqual(response.status, 202, await response.text())
+        run = await response.json()
+        for _ in range(200):
+            result = await (await self.client.get(f"/api/runs/{run['id']}")).json()
+            if result['run']['status'] != 'running':
+                break
+            await asyncio.sleep(.05)
+        self.assertEqual(result['run']['status'], 'completed', result['run']['error'])
+        self.assertEqual(result['summary']['success'], 2)
+        self.assertEqual(len(self.payloads), 2)
+        for payload in self.payloads:
+            self.assertEqual(payload['chat_template_kwargs'], {'enable_thinking': False})
+            self.assertTrue(payload['ignore_eos'])
+        await self.client.close()
+        self.client = TestClient(TestServer(create_app(self.root / 'data', self.root)))
+        await self.client.start_server()
+        saved = await (await self.client.get(f"/api/runs/{run['id']}")).json()
+        self.assertEqual(saved['run']['chat_template_kwargs'], {'enable_thinking': False})
+        self.assertEqual(saved['run']['ignore_eos'], 1)
+
     async def test_slow_input_preparation_finishes_before_measured_run_and_preserves_usage(self):
         source = self.root / 'original.jsonl'
         source.write_text(json.dumps(trajectory()) + '\n', encoding='utf-8')

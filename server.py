@@ -169,7 +169,7 @@ class CloudBench:
             "runs": {"dataset_id": "TEXT", "dataset_name": "TEXT", "mode": "TEXT", "request_rate": "REAL",
                      "arrival_pattern": "TEXT", "seed": "INTEGER", "input_words": "INTEGER", "max_input_tokens": "INTEGER",
                      "unit_count": "INTEGER", "min_input_tokens": "INTEGER", "request_timeout": "REAL",
-                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER"},
+                     "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER", "chat_template_kwargs": "TEXT"},
             "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL",
                         "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT"},
         }
@@ -354,6 +354,9 @@ class CloudBench:
         seed = 42 if body.get("seed") in (None, "") else number(body["seed"], "随机种子", 0, 4294967295, True)
         timeout = number(120 if body.get("request_timeout") in (None, "") else body["request_timeout"], "单请求超时", 1, 7200)
         turn_delay = number(body.get("turn_delay_ms") or 0, "轮间等待", 0, 60000)
+        chat_template_kwargs = body.get("chat_template_kwargs")
+        if chat_template_kwargs is not None and not isinstance(chat_template_kwargs, dict):
+            raise ApiError("chat_template_kwargs 必须是 JSON 对象")
         requested_count = body.get("request_count")
         units = None if requested_count in (None, "") else number(requested_count, "测试条数/会话数", 1, 1000000000, True)
         if self.active or getattr(self, 'preparing', False):
@@ -383,6 +386,7 @@ class CloudBench:
                 0 if concurrency is None or concurrency == "" else number(concurrency, "并发数", 1, 1000000000, True)),
             "unit_count": units, "min_input_tokens": minimum, "request_timeout": timeout, "turn_delay_ms": turn_delay,
             "ignore_eos": 1 if body.get("ignore_eos") else 0,
+            "chat_template_kwargs": json.dumps(chat_template_kwargs, ensure_ascii=False) if chat_template_kwargs is not None else None,
             "dataset_snapshot": json.dumps({k: dataset.get(k) for k in ("sha256", "tokenizer", "length_label", "prepared_at", "sampling", "source", "offset", "max_turns")}, ensure_ascii=False),
             "include_usage": 0 if body.get("include_usage") is False else 1,
             "dataset_id": dataset["id"], "dataset_name": dataset["name"], "mode": mode,
@@ -437,6 +441,8 @@ class CloudBench:
                 if "selected" in dataset:
                     config["dataset"]["selected"] = dataset["selected"]
                 config["run"]["include_usage"] = bool(run["include_usage"])
+                if run.get("chat_template_kwargs") is not None:
+                    config["run"]["chat_template_kwargs"] = json.loads(run["chat_template_kwargs"])
                 process.stdin.write(json.dumps(config, ensure_ascii=False).encode("utf-8"))
                 await process.stdin.drain()
                 process.stdin.close()
@@ -480,6 +486,8 @@ class CloudBench:
         run = self.one("SELECT * FROM runs WHERE id=?", (run_id,))
         if run is None:
             raise ApiError("测试不存在", 404)
+        if run.get("chat_template_kwargs") is not None:
+            run["chat_template_kwargs"] = json.loads(run["chat_template_kwargs"])
         return run
 
     def samples(self, run_id: str) -> list[dict[str, Any]]:

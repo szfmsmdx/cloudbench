@@ -142,6 +142,8 @@ function renderRun(data) {
     metric('本次硬件成本', s.hardware_run_cost == null ? '—' : fmt(s.hardware_run_cost, 6), run.gpu_currency || '', s.hardware_run_cost == null ? '填写 GPU 数量和单价' : s.hardware_per_1m_output == null ? '尚无输出 token 数据' : `每百万输出 token：${fmt(s.hardware_per_1m_output, 2)}`)
   ].join('');
   let note = 'TTFT 为客户端观测的首个有效输出片段；TPOT 需服务端返回输出 token 用量。';
+  note += run.ignore_eos ? ` 忽略 EOS，固定输出 ${run.max_tokens} token。` : ` 自然 EOS，输出上限 ${run.max_tokens} token。`;
+  if (run.chat_template_kwargs?.enable_thinking === false) note += ' 本次请求已显式关闭思考。';
   if (run.dataset_id?.startsWith('public:')) {
     const snapshot = JSON.parse(run.dataset_snapshot || '{}');
     note += ` 长度口径：${snapshot.length_label || '未知'}；实际token以服务端usage为准。`;
