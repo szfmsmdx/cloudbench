@@ -22,7 +22,7 @@ import aiohttp
 
 from pybench.datasets import TRUNCATE_RATIO, load_local_items
 from pybench.protocols import anthropic_output, target_endpoint, target_protocol, request_body
-from pybench.telemetry import RunTelemetry
+from pybench.telemetry import RunTelemetry, percentile
 from pybench.workloads import hydrate_workload, iter_workload_turns, load_workloads, paths, select_workloads, turn_count
 
 
@@ -111,6 +111,9 @@ async def measure_request(
     started_at = utc_now()
     sent_offset_ms = (started - run_start) * 1000
     first_output: float | None = None
+    previous_output: float | None = None
+    itl_gaps: list[float] = []
+    streamed = False
     usage: dict[str, Any] | None = None
     status = "ok"
     http_status: int | None = None
@@ -139,12 +142,13 @@ async def measure_request(
                 detail = (await response.text())[:300]
                 raise RuntimeError(f"HTTP {response.status}: {detail}")
             if "text/event-stream" in response.headers.get("Content-Type", ""):
+                streamed = True
                 decoder = codecs.getincrementaldecoder("utf-8")()
                 buffer = ""
                 stream_finished = False
 
-                def consume(event: str) -> None:
-                    nonlocal first_output, usage, output_seen, finish_reason, stream_finished
+                def consume(event: str, received_at: float) -> None:
+                    nonlocal first_output, previous_output, usage, output_seen, finish_reason, stream_finished
                     data = "\n".join(line[5:].lstrip() for line in event.splitlines() if line.startswith("data:"))
                     if not data or data == "[DONE]":
                         return
@@ -169,8 +173,11 @@ async def measure_request(
                             if on_progress:
                                 on_progress(None, True)
                             output_seen = True
-                            if first_output is None:
-                                first_output = loop.time()
+                            if previous_output is not None:
+                                itl_gaps.append(round((received_at - previous_output) * 1000, 3))
+                            else:
+                                first_output = received_at
+                            previous_output = received_at
                         return
                     for choice in chunk.get("choices") or []:
                         finish_reason = choice.get("finish_reason") or finish_reason
@@ -182,17 +189,21 @@ async def measure_request(
                         if on_progress:
                             on_progress(None, True)
                         output_seen = True
-                        if first_output is None:
-                            first_output = loop.time()
+                        if previous_output is not None:
+                            itl_gaps.append(round((received_at - previous_output) * 1000, 3))
+                        else:
+                            first_output = received_at
+                        previous_output = received_at
 
                 async for data in response.content.iter_any():
+                    received_at = loop.time()
                     buffer += decoder.decode(data)
                     while match := re.search(r"\r?\n\r?\n", buffer):
                         event, buffer = buffer[:match.start()], buffer[match.end():]
-                        consume(event)
+                        consume(event, received_at)
                 buffer += decoder.decode(b"", final=True)
                 if buffer.strip():
-                    consume(buffer)
+                    consume(buffer, loop.time())
                 if anthropic and not stream_finished:
                     raise RuntimeError('Anthropic 流在 message_stop 之前中断')
             else:
@@ -226,6 +237,11 @@ async def measure_request(
         "ttft_ms": round(ttft, 2) if ttft is not None else None,
         "e2e_ms": round(e2e, 2),
         "tpot_ms": round(tpot, 2) if tpot is not None else None,
+        "itl_count": len(itl_gaps) if streamed else None,
+        "itl_p50_ms": percentile(itl_gaps, .5, 2),
+        "itl_p95_ms": percentile(itl_gaps, .95, 2),
+        "itl_p99_ms": percentile(itl_gaps, .99, 2),
+        "itl_gaps_json": json.dumps(itl_gaps, separators=(',', ':')) if itl_gaps else None,
         "dataset_item_index": item["index"],
         "session_id": item.get("session_id"), "turn_index": item.get("turn_index"),
         "source_item_id": item.get("source_item_id"), "finish_reason": finish_reason,

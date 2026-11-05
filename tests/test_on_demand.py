@@ -131,6 +131,9 @@ class OnDemandWorkerTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(.05)
         self.assertEqual(result['run']['status'], 'completed', result['run']['error'])
         self.assertEqual(result['summary']['success'], 2)
+        self.assertEqual(result['summary']['itl']['n'], 2)
+        self.assertTrue(all(s['itl_count'] == 1 and s['itl_p50_ms'] > 0 for s in result['samples']))
+        self.assertTrue(all('itl_gaps_json' not in s for s in result['samples']))
         self.assertEqual(len(self.payloads), 2)
         for payload in self.payloads:
             self.assertEqual(payload['chat_template_kwargs'], {'enable_thinking': False})
@@ -143,6 +146,7 @@ class OnDemandWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved['run']['ignore_eos'], 1)
         self.assertEqual(saved['run']['truncate_ratio'], .89)
         self.assertEqual(saved['run']['force_close'], 0)
+        self.assertEqual(saved['summary']['itl'], result['summary']['itl'])
 
     async def test_slow_input_preparation_finishes_before_measured_run_and_preserves_usage(self):
         source = self.root / 'original.jsonl'

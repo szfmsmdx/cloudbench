@@ -237,6 +237,8 @@ class PublicWorkloadAPITests(unittest.IsolatedAsyncioTestCase):
             chunk = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "live-id", "type": "function",
                 "function": {"name": "bash", "arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}
             await response.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+            await asyncio.sleep(.01)
+            await response.write(b'data: {"choices":[{"delta":{"content":"next"}}]}\n\n')
             await response.write(b'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}\n\n')
             await response.write(b"data: [DONE]\n\n")
             return response

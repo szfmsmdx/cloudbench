@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS samples (
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL, seq INTEGER NOT NULL,
   status TEXT NOT NULL, http_status INTEGER, started_at TEXT NOT NULL,
   ttft_ms REAL, e2e_ms REAL, tpot_ms REAL,
+  itl_count INTEGER, itl_p50_ms REAL, itl_p95_ms REAL, itl_p99_ms REAL, itl_gaps_json TEXT,
   prompt_tokens INTEGER, completion_tokens INTEGER, cached_tokens INTEGER,
   uncached_tokens INTEGER, cache_write_tokens INTEGER,
   usage_source TEXT NOT NULL, estimated_cost REAL, error TEXT,
@@ -172,7 +173,8 @@ class CloudBench:
                      "turn_delay_ms": "REAL", "dataset_snapshot": "TEXT", "ignore_eos": "INTEGER", "chat_template_kwargs": "TEXT",
                      "truncate_ratio": "REAL", "force_close": "INTEGER"},
             "samples": {"dataset_item_index": "INTEGER", "scheduled_offset_ms": "REAL", "sent_offset_ms": "REAL", "queue_delay_ms": "REAL",
-                        "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT"},
+                        "session_id": "TEXT", "turn_index": "INTEGER", "source_item_id": "TEXT", "finish_reason": "TEXT",
+                        "itl_count": "INTEGER", "itl_p50_ms": "REAL", "itl_p95_ms": "REAL", "itl_p99_ms": "REAL", "itl_gaps_json": "TEXT"},
         }
         for table, columns in migrations.items():
             present = {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
@@ -426,6 +428,7 @@ class CloudBench:
             process = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "pybench.runner", cwd=ROOT,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                limit=1024 * 1024,
                 env={**os.environ, "PYTHONUTF8": "1"},
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
@@ -505,7 +508,8 @@ class CloudBench:
     async def get_run(self, request: web.Request) -> web.Response:
         run = self.read_run(request.match_info["id"])
         samples = self.samples(run["id"])
-        return json_response({"run": {key: value for key, value in run.items() if key != "prompt"}, "samples": samples,
+        public_samples = [{k: v for k, v in sample.items() if k != "itl_gaps_json"} for sample in samples]
+        return json_response({"run": {key: value for key, value in run.items() if key != "prompt"}, "samples": public_samples,
                               "timeline": self.timeline(run["id"]), "summary": summarize(run, samples)})
 
     def stop(self, active: ActiveRun) -> None:

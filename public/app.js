@@ -155,6 +155,9 @@ function renderRun(data) {
     metric('TTFT · p99', fmt(s.ttft.p99), 'ms', `${s.ttft.n} 个有效样本`),
     metric('TPOT · p50', fmt(s.tpot.p50), 'ms', `${s.tpot.n} 个有效样本`),
     metric('TPOT · p99', fmt(s.tpot.p99), 'ms', `${s.tpot.n} 个有效样本`),
+    metric('ITL · p50', fmt(s.itl?.p50), 'ms', `${s.itl?.n || 0} 个输出间隔`),
+    metric('ITL · p95', fmt(s.itl?.p95), 'ms', `${s.itl?.n || 0} 个输出间隔`),
+    metric('ITL · p99', fmt(s.itl?.p99), 'ms', `${s.itl?.n || 0} 个输出间隔`),
     metric('E2E · p95', fmt(s.e2e.p95), 'ms', `${s.e2e.n} 个有效样本`),
     metric('平均输入 token', fmt(inputAverage.value), 'tok', `${inputAverage.n} 个有输入用量的成功请求`),
     metric('平均输出 token', fmt(outputAverage.value), 'tok', `${outputAverage.n} 个有输出用量的成功请求`),
@@ -167,7 +170,7 @@ function renderRun(data) {
     metric('卡时成本', s.hardware_hourly_cost == null ? '—' : fmt(s.hardware_hourly_cost, 4), `${run.gpu_currency || ''}/h`, run.gpu_count ? `${run.gpu_count} 张 GPU` : '填写 GPU 数量和单价'),
     metric('本次硬件成本', s.hardware_run_cost == null ? '—' : fmt(s.hardware_run_cost, 6), run.gpu_currency || '', s.hardware_run_cost == null ? '填写 GPU 数量和单价' : s.hardware_per_1m_output == null ? '尚无输出 token 数据' : `每百万输出 token：${fmt(s.hardware_per_1m_output, 2)}`)
   ].join('');
-  let note = 'TTFT 为客户端观测的首个有效输出片段；TPOT 需服务端返回输出 token 用量。';
+  let note = 'TTFT 为客户端观测的首个有效输出片段；TPOT 需服务端返回输出 token 用量。ITL 为客户端相邻有效流式输出片段的间隔，汇总成功请求中的全部间隔；一个片段可能包含多个 token，网络缓冲可能影响结果。';
   note += run.ignore_eos ? ` 忽略 EOS，固定输出 ${run.max_tokens} token。` : ` 自然 EOS，输出上限 ${run.max_tokens} token。`;
   if (run.chat_template_kwargs?.enable_thinking === false) note += ' 本次请求已显式关闭思考。';
   if (run.dataset_id?.startsWith('public:')) {
