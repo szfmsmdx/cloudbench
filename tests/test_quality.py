@@ -114,10 +114,12 @@ class QualityApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['samples'][0]['reasoning'], 'Reasoning')
 
     async def test_generation_scoring_export_and_history(self):
-        response = await self.client.post('/api/quality', json={'target_id': 'mock', 'count': 198})
+        response = await self.client.post('/api/quality', json={'target_id': 'mock', 'count': 198, 'reasoning_effort': 100})
         self.assertEqual(response.status, 201)
         ident = (await response.json())['id']
         result = await self.wait_run(ident)
+        self.assertEqual(result['reasoning_effort'], 100)
+        self.assertTrue(all(call['reasoning_effort'] == 100 for call in self.calls))
         self.assertEqual(result['summary']['correct'], 1)
         self.assertEqual(result['summary']['unparsed'], 196)
         self.assertEqual(result['summary']['errors'], 1)

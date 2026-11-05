@@ -83,6 +83,9 @@ class Quality:
         chat_template_kwargs = body.get('chat_template_kwargs')
         if chat_template_kwargs is not None and not isinstance(chat_template_kwargs, dict):
             raise ApiError('chat_template_kwargs 必须是 JSON 对象')
+        reasoning_effort = body.get('reasoning_effort')
+        if reasoning_effort is not None and (isinstance(reasoning_effort, bool) or not isinstance(reasoning_effort, (int, float, str))):
+            raise ApiError('reasoning_effort 必须是数字或字符串')
         price = self.owner.one('SELECT * FROM prices WHERE id=?', (body.get('price_id'),)) if body.get('price_id') else None
         if body.get('price_id') and price is None:
             raise ApiError('价格版本不存在')
@@ -93,7 +96,7 @@ class Quality:
                'timeout': timeout, 'price': price, 'status': 'running', 'started_at': utc_now(),
                'finished_at': None, 'samples': [], 'error': None, 'temperature': 'provider-default',
                'reasoning': 'provider-default', 'repeats': 1, 'chat_template_kwargs': chat_template_kwargs,
-               'concurrency': concurrency}
+               'concurrency': concurrency, 'reasoning_effort': reasoning_effort}
         self.save(run)
         task = asyncio.create_task(self.execute(run, target, gpqa.questions(data, count, seed)))
         self.tasks[run['id']] = task
@@ -118,6 +121,8 @@ class Quality:
                 try:
                     payload = request_body(target, run,
                                            {'messages': [{'role': 'user', 'content': question['prompt']}]})
+                    if run.get('reasoning_effort') is not None:
+                        payload['reasoning_effort'] = run['reasoning_effort']
                     # Non-streaming generation keeps quality scoring independent of SSE chunks.
                     payload['stream'] = False
                     payload.pop('stream_options', None)
